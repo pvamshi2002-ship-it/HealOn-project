@@ -1,0 +1,539 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HealOn Admin Dashboard</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #1f2e5a;
+      --muted: #667085;
+      --line: #e5e7eb;
+      --blue: #2b5af0;
+      --green: #1abe8e;
+      --orange: #f59e0b;
+      --red: #ef4444;
+      --bg: #fbf5fd;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 22px 32px;
+      background: white;
+      border-bottom: 1px solid var(--line);
+    }
+    h1 { margin: 0; font-size: 28px; }
+    a {
+      color: var(--blue);
+      text-decoration: none;
+      font-weight: 700;
+    }
+    main {
+      padding: 32px;
+      max-width: 1280px;
+      margin: 0 auto;
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+    .stat, .panel {
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    .stat {
+      padding: 20px;
+    }
+    .label {
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 8px;
+    }
+    .value {
+      font-size: 30px;
+      font-weight: 800;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+    }
+    .request-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+    .work-boxes {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+    .work-box {
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .work-box-top {
+      align-items: center;
+      display: flex;
+      gap: 10px;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .work-type {
+      font-size: 16px;
+      font-weight: 800;
+    }
+    .work-employee {
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 8px;
+    }
+    .work-title {
+      font-weight: 800;
+      margin-bottom: 6px;
+    }
+    .work-detail {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+      max-height: 38px;
+      overflow: hidden;
+    }
+    .section-title {
+      color: var(--ink);
+      font-size: 22px;
+      margin: 0 0 12px;
+    }
+    .panel {
+      overflow: hidden;
+    }
+    .panel h2 {
+      margin: 0;
+      padding: 16px 18px;
+      font-size: 18px;
+      border-bottom: 1px solid var(--line);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    th, td {
+      text-align: left;
+      padding: 12px 18px;
+      border-bottom: 1px solid var(--line);
+      font-size: 14px;
+    }
+    th {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      background: #fcfcfd;
+    }
+    .empty {
+      padding: 18px;
+      color: var(--muted);
+    }
+    .messages {
+      display: grid;
+      gap: 8px;
+      margin-bottom: 18px;
+    }
+    .message {
+      background: #ecfdf3;
+      border: 1px solid #bbf7d0;
+      border-radius: 8px;
+      color: #166534;
+      font-weight: 700;
+      padding: 12px 14px;
+    }
+    .badge {
+      border-radius: 999px;
+      display: inline-block;
+      font-size: 12px;
+      font-weight: 800;
+      padding: 4px 9px;
+    }
+    .badge.pending { background: #fff7ed; color: #c2410c; }
+    .badge.open, .badge.in_progress { background: #eff6ff; color: #1d4ed8; }
+    .badge.approved { background: #ecfdf3; color: #047857; }
+    .badge.rejected { background: #fef2f2; color: #b91c1c; }
+    .actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .actions form { margin: 0; }
+    .btn {
+      border: 0;
+      border-radius: 6px;
+      color: white;
+      cursor: pointer;
+      font-weight: 800;
+      padding: 7px 10px;
+    }
+    .btn.approve { background: var(--green); }
+    .btn.reject { background: var(--red); }
+    .btn.pending { background: var(--orange); }
+    @media (max-width: 900px) {
+      .stats, .grid, .work-boxes { grid-template-columns: 1fr; }
+      header { align-items: flex-start; flex-direction: column; gap: 10px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>HealOn Admin Dashboard</h1>
+      <div class="label">Backend admin panel only</div>
+    </div>
+    <nav>
+      <a href="/admin/">Django Admin</a>
+      &nbsp;&nbsp;
+      <a href="/admin/logout/">Logout</a>
+    </nav>
+  </header>
+
+  <main>
+    {% if messages %}
+      <div class="messages">
+        {% for message in messages %}
+          <div class="message">{{ message }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    <section class="stats">
+      <div class="stat"><div class="label">Total Employees</div><div class="value">{{ summary.total_employees }}</div></div>
+      <div class="stat"><div class="label">Active Employees</div><div class="value">{{ summary.active_employees }}</div></div>
+      <div class="stat"><div class="label">Present Today</div><div class="value">{{ summary.present_today }}</div></div>
+      <div class="stat"><div class="label">Absent Today</div><div class="value">{{ summary.absent_today }}</div></div>
+      <div class="stat"><div class="label">Total Requests</div><div class="value">{{ summary.total_requests }}</div></div>
+      <div class="stat"><div class="label">Pending Leaves</div><div class="value">{{ summary.pending_leaves }}</div></div>
+      <div class="stat"><div class="label">Pending Regularizations</div><div class="value">{{ summary.pending_regularizations }}</div></div>
+      <div class="stat"><div class="label">Open Tickets</div><div class="value">{{ summary.open_tickets }}</div></div>
+      <div class="stat"><div class="label">Published Payslips</div><div class="value">{{ summary.published_payslips }}</div></div>
+      <div class="stat"><div class="label">Tasks In Progress</div><div class="value">{{ summary.tasks_in_progress }}</div></div>
+    </section>
+
+    <h2 class="section-title">Pending Works From Users</h2>
+    {% if pending_work_items %}
+      <section class="work-boxes">
+        {% for item in pending_work_items %}
+          <article class="work-box">
+            <div class="work-box-top">
+              <div class="work-type">{{ item.type }}</div>
+              <span class="badge {{ item.status }}">{{ item.status_label }}</span>
+            </div>
+            <div class="work-employee">{{ item.employee }}</div>
+            <div class="work-title">{{ item.title }}</div>
+            <div class="work-detail">{{ item.details|default:"-"|linebreaksbr }}</div>
+          </article>
+        {% endfor %}
+      </section>
+    {% else %}
+      <section class="panel" style="margin-bottom:28px">
+        <div class="empty">No pending works from users.</div>
+      </section>
+    {% endif %}
+
+    <section class="panel" style="margin-bottom:18px">
+      <h2>Employees</h2>
+      {% if employees %}
+        <table>
+          <thead>
+            <tr>
+              <th>Username</th>
+              <th>Name</th>
+              <th>Email</th>
+              <th>Employee Code</th>
+              <th>Department</th>
+              <th>Designation</th>
+              <th>Active</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for employee in employees %}
+              <tr>
+                <td>{{ employee.username }}</td>
+                <td>{{ employee.get_full_name|default:employee.username }}</td>
+                <td>{{ employee.email|default:"-" }}</td>
+                <td>{{ employee.userprofile.employee_code|default:employee.username }}</td>
+                <td>{{ employee.userprofile.department|default:"-" }}</td>
+                <td>{{ employee.userprofile.designation|default:"-" }}</td>
+                <td>{{ employee.is_active|yesno:"Yes,No" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <div class="empty">No employees yet.</div>
+      {% endif %}
+    </section>
+
+    <h2 class="section-title">User Requests</h2>
+    <section class="request-grid">
+      <div class="panel">
+        <h2>Leave Requests From Users</h2>
+        {% if pending_leaves %}
+          <table>
+            <thead>
+              <tr>
+                <th>Employee</th>
+                <th>Type</th>
+                <th>Dates</th>
+                <th>Days</th>
+                <th>Reason</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in pending_leaves %}
+                <tr>
+                  <td>{{ item.employee }}</td>
+                  <td>{{ item.leave_type }}</td>
+                  <td>{{ item.from_date }} to {{ item.to_date }}</td>
+                  <td>{{ item.total_days }}</td>
+                  <td>{{ item.reason|default:"-"|linebreaksbr }}</td>
+                  <td><span class="badge {{ item.status }}">{{ item.get_status_display }}</span></td>
+                  <td>
+                    <div class="actions">
+                      <form method="post" action="{% url 'admin-leave-status' item.id 'approved' %}">
+                        {% csrf_token %}
+                        <button class="btn approve" type="submit">Approve</button>
+                      </form>
+                      <form method="post" action="{% url 'admin-leave-status' item.id 'rejected' %}">
+                        {% csrf_token %}
+                        <button class="btn reject" type="submit">Reject</button>
+                      </form>
+                    </div>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <div class="empty">No pending leave requests.</div>
+        {% endif %}
+      </div>
+
+      <div class="panel">
+        <h2>Regularization Requests From Users</h2>
+        {% if pending_regularizations %}
+          <table>
+            <thead>
+              <tr>
+                <th>Employee</th>
+                <th>Date</th>
+                <th>Check In</th>
+                <th>Check Out</th>
+                <th>CC</th>
+                <th>Reason</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in pending_regularizations %}
+                <tr>
+                  <td>{{ item.employee }}</td>
+                  <td>{{ item.date }}</td>
+                  <td>{{ item.check_in_time|default:"-" }}</td>
+                  <td>{{ item.check_out_time|default:"-" }}</td>
+                  <td>{{ item.cc|default:"-"|linebreaksbr }}</td>
+                  <td>{{ item.reason|default:"-"|linebreaksbr }}</td>
+                  <td><span class="badge {{ item.status }}">{{ item.get_status_display }}</span></td>
+                  <td>
+                    <div class="actions">
+                      <form method="post" action="{% url 'admin-regularization-status' item.id 'approved' %}">
+                        {% csrf_token %}
+                        <button class="btn approve" type="submit">Approve</button>
+                      </form>
+                      <form method="post" action="{% url 'admin-regularization-status' item.id 'rejected' %}">
+                        {% csrf_token %}
+                        <button class="btn reject" type="submit">Reject</button>
+                      </form>
+                    </div>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <div class="empty">No pending regularization requests.</div>
+        {% endif %}
+      </div>
+    </section>
+
+    <section class="grid">
+      <div class="panel">
+        <h2>Recent Attendance</h2>
+        {% if recent_attendance %}
+          <table>
+            <thead><tr><th>User</th><th>Event</th><th>Time</th><th>Assigned Location</th><th>Restriction</th></tr></thead>
+            <tbody>
+              {% for item in recent_attendance %}
+                <tr>
+                  <td>{{ item.user }}</td>
+                  <td>{{ item.get_event_type_display }}</td>
+                  <td>{{ item.timestamp }}</td>
+                  <td>{{ item.location_address|default:"-"|linebreaksbr }}</td>
+                  <td>
+                    {% if item.assigned_location %}
+                      {{ item.assigned_location.radius_meters }}m radius
+                    {% else %}
+                      -
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <div class="empty">No attendance records yet.</div>
+        {% endif %}
+      </div>
+
+      <div class="panel">
+        <h2>Attendance Regularizations</h2>
+        {% if recent_regularizations %}
+          <table>
+            <thead>
+              <tr>
+                <th>Employee</th>
+                <th>Date</th>
+                <th>Check In</th>
+                <th>Check Out</th>
+                <th>CC</th>
+                <th>Reason</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in recent_regularizations %}
+                <tr>
+                  <td>{{ item.employee }}</td>
+                  <td>{{ item.date }}</td>
+                  <td>{{ item.check_in_time|default:"-" }}</td>
+                  <td>{{ item.check_out_time|default:"-" }}</td>
+                  <td>{{ item.cc|default:"-"|linebreaksbr }}</td>
+                  <td>{{ item.reason|default:"-"|linebreaksbr }}</td>
+                  <td><span class="badge {{ item.status }}">{{ item.get_status_display }}</span></td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <div class="empty">No regularization requests yet.</div>
+        {% endif %}
+      </div>
+
+      <div class="panel">
+        <h2>Recent Tasks</h2>
+        {% if recent_tasks %}
+          <table>
+            <thead><tr><th>Employee</th><th>Task</th><th>Status</th></tr></thead>
+            <tbody>
+              {% for item in recent_tasks %}
+                <tr><td>{{ item.employee }}</td><td>{{ item.title }}</td><td>{{ item.get_status_display }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <div class="empty">No tasks yet.</div>
+        {% endif %}
+      </div>
+
+      <div class="panel">
+        <h2>Leave Requests</h2>
+        {% if recent_leaves %}
+          <table>
+            <thead>
+              <tr>
+                <th>Employee</th>
+                <th>Type</th>
+                <th>Dates</th>
+                <th>Days</th>
+                <th>Reason</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in recent_leaves %}
+                <tr>
+                  <td>{{ item.employee }}</td>
+                  <td>{{ item.leave_type }}</td>
+                  <td>{{ item.from_date }} to {{ item.to_date }}</td>
+                  <td>{{ item.total_days }}</td>
+                  <td>{{ item.reason|default:"-"|linebreaksbr }}</td>
+                  <td>
+                    <span class="badge {{ item.status }}">{{ item.get_status_display }}</span>
+                  </td>
+                  <td>
+                    <div class="actions">
+                      {% if item.status != "approved" %}
+                        <form method="post" action="{% url 'admin-leave-status' item.id 'approved' %}">
+                          {% csrf_token %}
+                          <button class="btn approve" type="submit">Approve</button>
+                        </form>
+                      {% endif %}
+                      {% if item.status != "rejected" %}
+                        <form method="post" action="{% url 'admin-leave-status' item.id 'rejected' %}">
+                          {% csrf_token %}
+                          <button class="btn reject" type="submit">Reject</button>
+                        </form>
+                      {% endif %}
+                      {% if item.status != "pending" %}
+                        <form method="post" action="{% url 'admin-leave-status' item.id 'pending' %}">
+                          {% csrf_token %}
+                          <button class="btn pending" type="submit">Pending</button>
+                        </form>
+                      {% endif %}
+                    </div>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <div class="empty">No leave requests yet.</div>
+        {% endif %}
+      </div>
+
+      <div class="panel">
+        <h2>Helpdesk Tickets</h2>
+        {% if recent_tickets %}
+          <table>
+            <thead><tr><th>Employee</th><th>Subject</th><th>Status</th></tr></thead>
+            <tbody>
+              {% for item in recent_tickets %}
+                <tr><td>{{ item.employee }}</td><td>{{ item.subject }}</td><td>{{ item.get_status_display }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <div class="empty">No helpdesk tickets yet.</div>
+        {% endif %}
+      </div>
+    </section>
+  </main>
+</body>
+</html>
