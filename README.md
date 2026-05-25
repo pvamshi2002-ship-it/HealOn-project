@@ -19,6 +19,6 @@ HealOn also supports future enhancements such as biometric verification, face re
 - **Username:** hr
 - **Password:** HR@123
 
-### Backend Admin Dashboard
+### Backend Admin Login
 - **Username:** admin
 - **Password:** Admin@123
