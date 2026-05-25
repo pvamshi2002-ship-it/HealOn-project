@@ -3,25 +3,22 @@ These project main theme is “A smart attendance management system that uses pr
 The project is designed to improve attendance accuracy, employee management, and organizational workflow.
 HealOn also supports future enhancements such as biometric verification, face recognition attendance, advanced analytics, and notification systems.
 
-  Temporary  dashboard login details 
- 
-  user dashboard :                  
-  User name -vamshi
-  
-  password - vamshi@123
-  
-  admin dashboard :
-  Username-admin
-  
-  Password- Admin@123
- 
-  
-  Hr dashboard 
-  Username- hr
-  
-  password-HR@123
+ # HealOn Project
 
- Backend Admin Dashboard;
- Username -admin
- 
- Password-Admin@123
+## Temporary Dashboard Login Details
+
+### User Dashboard
+- **Username:** vamshi
+- **Password:** vamshi@123
+
+### Admin Dashboard
+- **Username:** admin
+- **Password:** Admin@123
+
+### HR Dashboard
+- **Username:** hr
+- **Password:** HR@123
+
+### Backend Admin Dashboard
+- **Username:** admin
+- **Password:** Admin@123
