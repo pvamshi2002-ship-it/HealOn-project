@@ -11,6 +11,9 @@ from .models import AssignedLocation, Attendance, UserProfile
 from .views import haversine_distance_meters
 
 
+PHOTO_BIOMETRIC = 'data:image/png;base64,cGhvdG8='
+
+
 class TwilioResponse:
     def __init__(self, body, status_code=200):
         self.body = body
@@ -64,6 +67,10 @@ class DashboardLoginTests(APITestCase):
         self.admin_token = Token.objects.create(user=self.admin)
         self.employee_token = Token.objects.create(user=self.employee)
         self.hr_token = Token.objects.create(user=self.hr)
+        UserProfile.objects.update_or_create(
+            user=self.employee,
+            defaults={'profile_photo_biometric': PHOTO_BIOMETRIC},
+        )
 
     def test_auth_allows_matching_admin_role(self):
         response = self.client.post(
@@ -122,6 +129,17 @@ class DashboardLoginTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['user']['role'], 'HR')
 
+    def test_hr_can_access_people_management_apis(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.hr_token.key}')
+
+        dashboard_response = self.client.get('/api/admin/dashboard/')
+        employees_response = self.client.get('/api/admin/employees/')
+        attendance_response = self.client.get('/api/admin/attendance/')
+
+        self.assertEqual(dashboard_response.status_code, 200)
+        self.assertEqual(employees_response.status_code, 200)
+        self.assertEqual(attendance_response.status_code, 200)
+
     def test_admin_can_create_employee_with_login_password(self):
         self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.admin_token.key}')
         response = self.client.post(
@@ -133,6 +151,7 @@ class DashboardLoginTests(APITestCase):
                 'email': 'new.employee@healon.local',
                 'username': 'newemployee',
                 'password': 'Newpass@123',
+                'profile_photo_biometric': PHOTO_BIOMETRIC,
                 'department': 'Support',
                 'designation': 'Support Executive',
                 'can_access_user_dashboard': True,
@@ -170,6 +189,7 @@ class DashboardLoginTests(APITestCase):
                 'email': 'access.manager@healon.local',
                 'username': 'accessmanager',
                 'password': 'Access@123',
+                'profile_photo_biometric': PHOTO_BIOMETRIC,
                 'department': 'People',
                 'designation': 'Manager',
                 'can_access_user_dashboard': True,
@@ -205,6 +225,7 @@ class DashboardLoginTests(APITestCase):
                 'email': 'location.user@healon.local',
                 'username': 'locationuser',
                 'password': 'Location@123',
+                'profile_photo_biometric': PHOTO_BIOMETRIC,
                 'department': 'Operations',
                 'designation': 'Executive',
                 'location_name': 'Head Office',
@@ -274,6 +295,7 @@ class DashboardLoginTests(APITestCase):
                 'latitude': '17.400000',
                 'longitude': '78.500000',
                 'accuracy': 8.5,
+                'photo_biometric': PHOTO_BIOMETRIC,
             },
             format='json',
         )
@@ -286,6 +308,7 @@ class DashboardLoginTests(APITestCase):
                 'latitude': '17.385044',
                 'longitude': '78.486671',
                 'accuracy': 8.5,
+                'photo_biometric': PHOTO_BIOMETRIC,
             },
             format='json',
         )
@@ -317,6 +340,7 @@ class DashboardLoginTests(APITestCase):
                 'latitude': '13.053333',
                 'longitude': '77.530604',
                 'accuracy': 8.5,
+                'photo_biometric': PHOTO_BIOMETRIC,
             },
             format='json',
         )
@@ -342,6 +366,7 @@ class DashboardLoginTests(APITestCase):
                 'latitude': '13.064800',
                 'longitude': '77.530600',
                 'accuracy': 8.5,
+                'photo_biometric': PHOTO_BIOMETRIC,
             },
             format='json',
         )
@@ -369,6 +394,7 @@ class DashboardLoginTests(APITestCase):
                 'latitude': '13.064800',
                 'longitude': '77.530600',
                 'accuracy': 8.5,
+                'photo_biometric': PHOTO_BIOMETRIC,
             },
             format='json',
         )

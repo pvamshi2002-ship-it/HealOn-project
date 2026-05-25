@@ -7,6 +7,7 @@ from math import atan2, cos, radians, sin, sqrt
 import secrets
 from urllib import parse, request as urlrequest
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
 
 from django.conf import settings
 from django.contrib import messages
@@ -35,10 +36,12 @@ from .models import (
     Holiday,
     LeaveRequest,
     PasswordResetOTP,
+    ReimbursementRequest,
     SalaryRecord,
     UserProfile,
 )
 from .location_utils import extract_coordinates_from_map_url, geocode_location_text
+from .password_rules import password_rule_error
 from .serializers import (
     AssignedLocationSerializer,
     AttendanceRegularizationSerializer,
@@ -47,6 +50,7 @@ from .serializers import (
     HelpdeskTicketSerializer,
     HolidaySerializer,
     LeaveRequestSerializer,
+    ReimbursementRequestSerializer,
     SalaryRecordSerializer,
 )
 
@@ -105,6 +109,18 @@ def user_can_access_dashboard(user, role):
     }
 
 
+def user_can_manage_people(user):
+    return user_can_access_dashboard(user, 'Admin') or user_can_access_dashboard(
+        user,
+        'HR',
+    )
+
+
+def looks_like_url(value):
+    parsed = urlparse((value or '').strip())
+    return bool(parsed.scheme and parsed.netloc)
+
+
 def admin_managed_users():
     return get_user_model().objects.filter(is_superuser=False)
 
@@ -115,8 +131,95 @@ def map_url_for_attendance(attendance):
     return f'https://www.google.com/maps?q={attendance.latitude},{attendance.longitude}'
 
 
+def photo_biometric_details(photo_biometric):
+    if not photo_biometric:
+        return {
+            'verified': False,
+            'message': 'Photo biometric missing.',
+            'mime_type': '',
+            'size_bytes': 0,
+        }
+    if not photo_biometric.startswith('data:image/'):
+        return {
+            'verified': False,
+            'message': 'Photo biometric must be an image.',
+            'mime_type': '',
+            'size_bytes': 0,
+        }
+    header, _, payload = photo_biometric.partition(',')
+    mime_type = header.removeprefix('data:').split(';')[0]
+    try:
+        size_bytes = len(base64.b64decode(payload, validate=True))
+    except Exception:
+        return {
+            'verified': False,
+            'message': 'Photo biometric image data is invalid.',
+            'mime_type': mime_type,
+            'size_bytes': 0,
+        }
+    return {
+        'verified': size_bytes > 0,
+        'message': 'Photo biometric verified.',
+        'mime_type': mime_type,
+        'size_bytes': size_bytes,
+    }
+
+
+def validate_photo_biometric(value, label='Photo biometric'):
+    details = photo_biometric_details(value)
+    if not details['verified']:
+        return details, f"{label} is required." if not value else details['message']
+    return details, ''
+
+
+def validate_pdf_data(value):
+    text = (value or '').strip()
+    if not text.startswith('data:application/pdf;base64,'):
+        return 'Upload a PDF file.'
+    payload = text.partition(',')[2]
+    try:
+        size_bytes = len(base64.b64decode(payload, validate=True))
+    except Exception:
+        return 'Uploaded PDF data is invalid.'
+    if size_bytes <= 0:
+        return 'Uploaded PDF is empty.'
+    return ''
+
+
+def approved_regularization_exists(employee, day):
+    return AttendanceRegularization.objects.filter(
+        employee=employee,
+        date=day,
+        status=AttendanceRegularization.STATUS_APPROVED,
+    ).exists()
+
+
+def attendance_hours(check_in, check_out):
+    if not check_in or not check_out or check_out.timestamp < check_in.timestamp:
+        return None
+    return round((check_out.timestamp - check_in.timestamp).total_seconds() / 3600, 2)
+
+
+def attendance_status_for_day(employee, day, check_in, check_out):
+    if approved_regularization_exists(employee, day):
+        return 'Present'
+    hours = attendance_hours(check_in, check_out)
+    if hours is None:
+        if check_out:
+            return 'Regularization'
+        return 'Absent'
+    if hours > 11:
+        return 'Regularization'
+    if hours >= 9:
+        return 'Present'
+    if hours >= 4.5:
+        return 'Half Day'
+    return 'Regularization'
+
+
 def serialize_attendance_admin_row(employee, day, check_in, check_out):
     assigned_location = getattr(employee, 'assigned_location', None)
+    hours = attendance_hours(check_in, check_out)
     return {
         'date': day.isoformat(),
         'employee_id': employee.id,
@@ -124,7 +227,8 @@ def serialize_attendance_admin_row(employee, day, check_in, check_out):
         'username': employee.username,
         'check_in': timezone.localtime(check_in.timestamp).strftime('%I:%M %p') if check_in else '-',
         'check_out': timezone.localtime(check_out.timestamp).strftime('%I:%M %p') if check_out else '-',
-        'status': 'Present' if check_in else 'Absent',
+        'total_hours': hours,
+        'status': attendance_status_for_day(employee, day, check_in, check_out),
         'assigned_location': (
             AssignedLocationSerializer(assigned_location).data
             if assigned_location
@@ -140,6 +244,14 @@ def serialize_attendance_admin_row(employee, day, check_in, check_out):
         'check_out_longitude': str(check_out.longitude) if check_out else '',
         'check_in_map_url': map_url_for_attendance(check_in),
         'check_out_map_url': map_url_for_attendance(check_out),
+        'check_in_photo_biometric': check_in.photo_biometric if check_in else '',
+        'check_out_photo_biometric': check_out.photo_biometric if check_out else '',
+        'check_in_biometric_details': photo_biometric_details(
+            check_in.photo_biometric if check_in else ''
+        ),
+        'check_out_biometric_details': photo_biometric_details(
+            check_out.photo_biometric if check_out else ''
+        ),
     }
 
 
@@ -154,6 +266,11 @@ def serialize_user(user):
         'last_name': user.last_name,
         'name': user.get_full_name() or user.username,
         'email': user.email,
+        'mobile_number': profile.mobile_number if profile else '',
+        'profile_photo_biometric': profile.profile_photo_biometric if profile else '',
+        'profile_photo_biometric_details': photo_biometric_details(
+            profile.profile_photo_biometric if profile else ''
+        ),
         'gender': profile.gender if profile else '',
         'date_of_birth': profile.date_of_birth.isoformat() if profile and profile.date_of_birth else '',
         'department': profile.department if profile else '',
@@ -269,7 +386,13 @@ def attendance_dashboard(user):
     month_records = records.filter(timestamp__date__gte=month_start, timestamp__date__lte=today)
     check_in = today_records.filter(event_type=Attendance.CHECK_IN).order_by('timestamp').first()
     check_out = today_records.filter(event_type=Attendance.CHECK_OUT).order_by('-timestamp').first()
-    present_days = month_records.filter(event_type=Attendance.CHECK_IN).dates('timestamp', 'day').count()
+    present_days = 0
+    for day in month_records.dates('timestamp', 'day'):
+        day_records = month_records.filter(timestamp__date=day)
+        check_in_for_day = day_records.filter(event_type=Attendance.CHECK_IN).order_by('timestamp').first()
+        check_out_for_day = day_records.filter(event_type=Attendance.CHECK_OUT).order_by('-timestamp').first()
+        if attendance_status_for_day(user, day, check_in_for_day, check_out_for_day) == 'Present':
+            present_days += 1
 
     return {
         'checked_in_today': check_in is not None,
@@ -681,6 +804,29 @@ class AttendanceEventView(APIView):
                     },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+            today = timezone.localdate()
+            if assigned_location.effective_from and today < assigned_location.effective_from:
+                return Response(
+                    {
+                        'detail': (
+                            'Your assigned attendance location is not active yet. '
+                            f'It starts on {assigned_location.effective_from.isoformat()}.'
+                        ),
+                        'assigned_location': AssignedLocationSerializer(assigned_location).data,
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if assigned_location.effective_to and today > assigned_location.effective_to:
+                return Response(
+                    {
+                        'detail': (
+                            'Your assigned attendance location has expired. '
+                            f'It ended on {assigned_location.effective_to.isoformat()}.'
+                        ),
+                        'assigned_location': AssignedLocationSerializer(assigned_location).data,
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             if not ensure_assigned_location_coordinates(assigned_location):
                 return Response(
                     {
@@ -689,6 +835,36 @@ class AttendanceEventView(APIView):
                             'Please ask admin to update the full workplace address.'
                         )
                     },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            profile = getattr(request.user, 'userprofile', None)
+            profile_photo = profile.profile_photo_biometric if profile else ''
+            _, profile_photo_error = validate_photo_biometric(
+                profile_photo,
+                'Registered employee photo',
+            )
+            if profile_photo_error:
+                return Response(
+                    {
+                        'detail': (
+                            'Registered employee photo is required before '
+                            'check-in or check-out. Please contact admin.'
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            photo_biometric = (
+                serializer.validated_data.get('photo_biometric') or ''
+            ).strip()
+            biometric_details, biometric_error = validate_photo_biometric(
+                photo_biometric,
+                'Captured attendance photo',
+            )
+            if biometric_error:
+                return Response(
+                    {'detail': biometric_error},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
@@ -722,7 +898,13 @@ class AttendanceEventView(APIView):
                 location_address=assigned_location.address,
                 distance_meters=round(distance_meters, 2),
             )
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            data = serializer.data
+            data['biometric_details'] = {
+                **biometric_details,
+                'registered_photo_verified': True,
+                'message': 'Photo biometric verified against registered employee photo.',
+            }
+            return Response(data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -762,14 +944,11 @@ class AttendanceReportView(APIView):
             check_outs = [item for item in day_records if item.event_type == Attendance.CHECK_OUT]
             check_in = check_ins[0] if check_ins else None
             check_out = check_outs[-1] if check_outs else None
-            hours = None
-            status_label = 'Incomplete'
-            if check_in and check_out and check_out.timestamp >= check_in.timestamp:
-                hours = round((check_out.timestamp - check_in.timestamp).total_seconds() / 3600, 2)
+            day_date = datetime.strptime(day, '%Y-%m-%d').date()
+            hours = attendance_hours(check_in, check_out)
+            status_label = attendance_status_for_day(request.user, day_date, check_in, check_out)
+            if hours is not None:
                 total_hours += hours
-                status_label = 'Present'
-            elif check_out:
-                status_label = 'Missing check-in'
             days.append({
                 'date': day,
                 'check_in': timezone.localtime(check_in.timestamp).strftime('%H:%M') if check_in else None,
@@ -781,7 +960,7 @@ class AttendanceReportView(APIView):
         return Response({
             'month': month,
             'summary': {
-                'present_days': len([day for day in days if day['check_in'] is not None]),
+                'present_days': len([day for day in days if day['status'] == 'Present']),
                 'total_hours': round(total_hours, 2),
                 'late_days': 0,
             },
@@ -819,6 +998,28 @@ class EmployeeTasksView(APIView):
             tasks = tasks.filter(assigned_date__month=request.query_params['month'])
         return Response({'summary': tasks_dashboard(request.user), 'tasks': EmployeeTaskSerializer(tasks, many=True).data})
 
+    def post(self, request):
+        task_id = request.data.get('task_id')
+        reason = (request.data.get('reason') or '').strip()
+        if not task_id:
+            return Response({'detail': 'Task is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not reason:
+            return Response({'detail': 'Reason is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        task = get_object_or_404(EmployeeTask, pk=task_id, employee=request.user)
+        if task.status == EmployeeTask.STATUS_COMPLETED:
+            return Response(
+                {'detail': 'Completed tasks cannot be submitted again.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        task.description = reason
+        task.status = EmployeeTask.STATUS_REVIEW
+        task.save(update_fields=['description', 'status', 'updated_at'])
+        return Response({
+            'detail': 'Task submitted to admin.',
+            'task': EmployeeTaskSerializer(task).data,
+        })
+
 
 class EmployeeLeaveRequestsView(APIView):
     authentication_classes = [TokenAuthentication]
@@ -847,6 +1048,57 @@ class EmployeeSalaryView(APIView):
         if request.query_params.get('month'):
             records = records.filter(month=request.query_params['month'])
         return Response({'summary': salary_dashboard(request.user), 'salary_records': SalaryRecordSerializer(records, many=True).data})
+
+
+class EmployeeReimbursementRequestsView(APIView):
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        requests = ReimbursementRequest.objects.filter(employee=request.user)
+        if request.query_params.get('date'):
+            requests = requests.filter(expense_date=request.query_params['date'])
+        return Response({
+            'reimbursements': ReimbursementRequestSerializer(requests, many=True).data,
+        })
+
+    def post(self, request):
+        expense_date_raw = (request.data.get('expense_date') or '').strip()
+        reason = (request.data.get('reason') or '').strip()
+        file_name = (request.data.get('file_name') or '').strip()
+        pdf_data = (request.data.get('pdf_data') or '').strip()
+
+        expense_date = parse_date(expense_date_raw) if expense_date_raw else None
+        if expense_date is None:
+            return Response(
+                {'detail': 'Select a valid reimbursement date.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not reason:
+            return Response(
+                {'detail': 'Reason is required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not file_name:
+            return Response(
+                {'detail': 'Upload a PDF file.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        pdf_error = validate_pdf_data(pdf_data)
+        if pdf_error:
+            return Response({'detail': pdf_error}, status=status.HTTP_400_BAD_REQUEST)
+
+        reimbursement = ReimbursementRequest.objects.create(
+            employee=request.user,
+            expense_date=expense_date,
+            reason=reason,
+            file_name=file_name,
+            pdf_data=pdf_data,
+        )
+        return Response(
+            {'reimbursement': ReimbursementRequestSerializer(reimbursement).data},
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class EmployeePayslipPdfView(APIView):
@@ -962,13 +1214,19 @@ class AdminDashboardView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        if not user_can_access_dashboard(request.user, 'Admin'):
+        if not user_can_manage_people(request.user):
             raise PermissionDenied
         User = get_user_model()
         employees = User.objects.filter(is_superuser=False)
         today = timezone.localdate()
         today_records = Attendance.objects.filter(timestamp__date=today)
-        present_today = today_records.filter(event_type=Attendance.CHECK_IN).values('user').distinct().count()
+        present_today = 0
+        for employee in employees:
+            user_records = today_records.filter(user=employee)
+            check_in = user_records.filter(event_type=Attendance.CHECK_IN).order_by('timestamp').first()
+            check_out = user_records.filter(event_type=Attendance.CHECK_OUT).order_by('-timestamp').first()
+            if attendance_status_for_day(employee, today, check_in, check_out) == 'Present':
+                present_today += 1
         pending_leave_requests = LeaveRequest.objects.filter(status=LeaveRequest.STATUS_PENDING).count()
         pending_regularization_requests = AttendanceRegularization.objects.filter(
             status=AttendanceRegularization.STATUS_PENDING
@@ -1039,6 +1297,10 @@ class AdminDashboardView(APIView):
                     }
                     for item in HelpdeskTicket.objects.select_related('employee').all()[:100]
                 ],
+                'reimbursements': ReimbursementRequestSerializer(
+                    ReimbursementRequest.objects.select_related('employee')[:100],
+                    many=True,
+                ).data,
             },
             'timestamp': timezone.now().isoformat(),
         })
@@ -1048,12 +1310,108 @@ class AdminDashboardStatsView(AdminDashboardView):
     pass
 
 
+class AdminReimbursementRequestsView(APIView):
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not user_can_manage_people(request.user):
+            raise PermissionDenied
+        requests = ReimbursementRequest.objects.select_related('employee')
+        if request.query_params.get('date'):
+            requests = requests.filter(expense_date=request.query_params['date'])
+        return Response({
+            'reimbursements': ReimbursementRequestSerializer(requests[:200], many=True).data,
+        })
+
+
+class AdminSalaryRecordsView(APIView):
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not user_can_manage_people(request.user):
+            raise PermissionDenied
+        records = SalaryRecord.objects.select_related('employee')
+        if request.query_params.get('employee_id'):
+            records = records.filter(employee_id=request.query_params['employee_id'])
+        if request.query_params.get('year'):
+            records = records.filter(year=request.query_params['year'])
+        if request.query_params.get('month'):
+            records = records.filter(month=request.query_params['month'])
+        return Response({
+            'salary_records': SalaryRecordSerializer(records[:200], many=True).data,
+        })
+
+    def post(self, request):
+        if not user_can_manage_people(request.user):
+            raise PermissionDenied
+
+        User = get_user_model()
+        employee = get_object_or_404(
+            User,
+            pk=request.data.get('employee_id'),
+            is_superuser=False,
+        )
+        try:
+            year = int(request.data.get('year'))
+            month = int(request.data.get('month'))
+        except (TypeError, ValueError):
+            return Response(
+                {'detail': 'Select a valid salary month and year.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if month < 1 or month > 12:
+            return Response(
+                {'detail': 'Select a valid salary month.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        decimal_fields = [
+            'basic_salary',
+            'allowances',
+            'deductions',
+            'bonus',
+            'incentives',
+            'tax_deducted',
+        ]
+        values = {}
+        for field in decimal_fields:
+            raw_value = request.data.get(field, 0) or 0
+            try:
+                values[field] = Decimal(str(raw_value))
+            except Exception:
+                return Response(
+                    {'detail': f'{field.replace("_", " ").title()} must be a valid amount.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if values[field] < 0:
+                return Response(
+                    {'detail': f'{field.replace("_", " ").title()} cannot be negative.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        record, _ = SalaryRecord.objects.update_or_create(
+            employee=employee,
+            year=year,
+            month=month,
+            defaults={
+                **values,
+                'is_published': bool(request.data.get('is_published', True)),
+            },
+        )
+        return Response(
+            {'salary_record': SalaryRecordSerializer(record).data},
+            status=status.HTTP_201_CREATED,
+        )
+
+
 class AdminLeaveStatusApiView(APIView):
     authentication_classes = [TokenAuthentication]
     permission_classes = [IsAuthenticated]
 
     def post(self, request, leave_id):
-        if not user_can_access_dashboard(request.user, 'Admin'):
+        if not user_can_manage_people(request.user):
             raise PermissionDenied
         new_status = request.data.get('status')
         if new_status not in {
@@ -1073,7 +1431,7 @@ class AdminRegularizationStatusApiView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, regularization_id):
-        if not user_can_access_dashboard(request.user, 'Admin'):
+        if not user_can_manage_people(request.user):
             raise PermissionDenied
         new_status = request.data.get('status')
         if new_status not in {
@@ -1093,7 +1451,7 @@ class AdminHelpdeskStatusApiView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, ticket_id):
-        if not user_can_access_dashboard(request.user, 'Admin'):
+        if not user_can_manage_people(request.user):
             raise PermissionDenied
         new_status = request.data.get('status')
         if new_status not in {
@@ -1118,19 +1476,23 @@ class AdminEmployeesApiView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        if not user_can_access_dashboard(request.user, 'Admin'):
+        if not user_can_manage_people(request.user):
             raise PermissionDenied
         employees = admin_managed_users().order_by('username')
         return Response({'employees': [serialize_user(employee) | {'total_checkins': Attendance.objects.filter(user=employee, event_type=Attendance.CHECK_IN).count()} for employee in employees]})
 
     def post(self, request):
-        if not user_can_access_dashboard(request.user, 'Admin'):
+        if not user_can_manage_people(request.user):
             raise PermissionDenied
 
         first_name = (request.data.get('first_name') or '').strip()
         last_name = (request.data.get('last_name') or '').strip()
         name = (request.data.get('name') or '').strip()
         email = (request.data.get('email') or '').strip()
+        mobile_number = normalize_mobile_number(request.data.get('mobile_number'))
+        profile_photo_biometric = (
+            request.data.get('profile_photo_biometric') or ''
+        ).strip()
         username = (request.data.get('username') or '').strip()
         password = request.data.get('password') or ''
         date_of_birth_raw = (request.data.get('date_of_birth') or '').strip()
@@ -1145,11 +1507,22 @@ class AdminEmployeesApiView(APIView):
         location_longitude = request.data.get('location_longitude')
         location_radius_meters = request.data.get('location_radius_meters') or 100
 
-        if not first_name and name:
-            first_name, _, last_name = name.partition(' ')
-        if not first_name or not last_name or not email or not username or not password:
+        if name and (not first_name or not last_name):
+            name_first, _, name_last = name.partition(' ')
+            first_name = first_name or name_first
+            last_name = last_name or name_last
+        if not first_name or not email or not username or not password:
             return Response(
-                {'detail': 'First name, last name, email, username, and password are required.'},
+                {'detail': 'Display name, email, username, and password are required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        _, profile_photo_error = validate_photo_biometric(
+            profile_photo_biometric,
+            'Employee verification photo',
+        )
+        if profile_photo_error:
+            return Response(
+                {'detail': 'Employee verification photo is required.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         date_of_birth = parse_date(date_of_birth_raw) if date_of_birth_raw else None
@@ -1167,9 +1540,10 @@ class AdminEmployeesApiView(APIView):
                 {'detail': 'Select at least one dashboard permission.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        if len(password) < 6:
+        password_error = password_rule_error(password)
+        if password_error:
             return Response(
-                {'detail': 'Password must be at least 6 characters.'},
+                {'detail': password_error},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         if any([location_address, location_latitude, location_longitude]) and not all(
@@ -1210,6 +1584,8 @@ class AdminEmployeesApiView(APIView):
             user=employee,
             defaults={
                 'employee_code': username.upper(),
+                'mobile_number': mobile_number,
+                'profile_photo_biometric': profile_photo_biometric,
                 'date_of_birth': date_of_birth,
                 'department': department,
                 'designation': designation or 'Employee',
@@ -1247,8 +1623,21 @@ class AdminEmployeeDetailApiView(APIView):
     authentication_classes = [TokenAuthentication]
     permission_classes = [IsAuthenticated]
 
+    def delete(self, request, employee_id):
+        if not user_can_manage_people(request.user):
+            raise PermissionDenied
+
+        employee = get_object_or_404(admin_managed_users(), pk=employee_id)
+        if employee.pk == request.user.pk:
+            return Response(
+                {'detail': 'You cannot delete your own employee account.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        employee.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
     def patch(self, request, employee_id):
-        if not user_can_access_dashboard(request.user, 'Admin'):
+        if not user_can_manage_people(request.user):
             raise PermissionDenied
 
         employee = get_object_or_404(admin_managed_users(), pk=employee_id)
@@ -1257,6 +1646,10 @@ class AdminEmployeeDetailApiView(APIView):
         last_name = (data.get('last_name') or '').strip()
         name = (data.get('name') or '').strip()
         email = (data.get('email') or '').strip()
+        mobile_number = normalize_mobile_number(data.get('mobile_number'))
+        profile_photo_biometric = (
+            data.get('profile_photo_biometric') or ''
+        ).strip()
         username = (data.get('username') or '').strip()
         date_of_birth_raw = (data.get('date_of_birth') or '').strip()
         department = (data.get('department') or '').strip()
@@ -1267,11 +1660,13 @@ class AdminEmployeeDetailApiView(APIView):
         password = data.get('password') or ''
         is_active = data.get('is_active')
 
-        if not first_name and name:
-            first_name, _, last_name = name.partition(' ')
-        if not first_name or not last_name or not email or not username:
+        if name and (not first_name or not last_name):
+            name_first, _, name_last = name.partition(' ')
+            first_name = first_name or name_first
+            last_name = last_name or name_last
+        if not first_name or not email or not username:
             return Response(
-                {'detail': 'First name, last name, email, and username are required.'},
+                {'detail': 'Display name, email, and username are required.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         date_of_birth = parse_date(date_of_birth_raw) if date_of_birth_raw else None
@@ -1295,11 +1690,22 @@ class AdminEmployeeDetailApiView(APIView):
             return Response({'detail': 'Username already exists.'}, status=status.HTTP_400_BAD_REQUEST)
         if User.objects.filter(email__iexact=email).exclude(pk=employee.pk).exists():
             return Response({'detail': 'Email already exists.'}, status=status.HTTP_400_BAD_REQUEST)
-        if password and len(password) < 6:
+        password_error = password_rule_error(password) if password else ''
+        if password_error:
             return Response(
-                {'detail': 'Password must be at least 6 characters.'},
+                {'detail': password_error},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        if profile_photo_biometric:
+            _, profile_photo_error = validate_photo_biometric(
+                profile_photo_biometric,
+                'Employee verification photo',
+            )
+            if profile_photo_error:
+                return Response(
+                    {'detail': profile_photo_error},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         employee.username = username
         employee.email = email
@@ -1311,17 +1717,21 @@ class AdminEmployeeDetailApiView(APIView):
         if password:
             employee.set_password(password)
         employee.save()
+        profile_defaults = {
+            'employee_code': username.upper(),
+            'mobile_number': mobile_number,
+            'date_of_birth': date_of_birth,
+            'department': department,
+            'designation': designation or 'Employee',
+            'can_access_user_dashboard': bool(can_access_user_dashboard),
+            'can_access_admin_dashboard': bool(can_access_admin_dashboard),
+            'can_access_hr_dashboard': bool(can_access_hr_dashboard),
+        }
+        if profile_photo_biometric:
+            profile_defaults['profile_photo_biometric'] = profile_photo_biometric
         UserProfile.objects.update_or_create(
             user=employee,
-            defaults={
-                'employee_code': username.upper(),
-                'date_of_birth': date_of_birth,
-                'department': department,
-                'designation': designation or 'Employee',
-                'can_access_user_dashboard': bool(can_access_user_dashboard),
-                'can_access_admin_dashboard': bool(can_access_admin_dashboard),
-                'can_access_hr_dashboard': bool(can_access_hr_dashboard),
-            },
+            defaults=profile_defaults,
         )
         employee.refresh_from_db()
         return Response({
@@ -1345,7 +1755,7 @@ class AdminEmployeeLocationApiView(APIView):
         return self.save_location(request, employee_id, partial=True)
 
     def save_location(self, request, employee_id, partial=False):
-        if not user_can_access_dashboard(request.user, 'Admin'):
+        if not user_can_manage_people(request.user):
             raise PermissionDenied
 
         employee = get_object_or_404(admin_managed_users(), pk=employee_id)
@@ -1353,13 +1763,38 @@ class AdminEmployeeLocationApiView(APIView):
         data = request.data.copy()
         address = (data.get('address') or '').strip()
         map_url = (data.get('map_url') or '').strip()
+        extra_location_text = (data.get('extra_location_text') or '').strip()
+        effective_from = parse_date(data.get('effective_from') or '') if data.get('effective_from') else None
+        effective_to = parse_date(data.get('effective_to') or '') if data.get('effective_to') else None
+        if data.get('effective_from') and effective_from is None:
+            return Response(
+                {'detail': 'Location start date must be in YYYY-MM-DD format.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if data.get('effective_to') and effective_to is None:
+            return Response(
+                {'detail': 'Location end date must be in YYYY-MM-DD format.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if effective_from and effective_to and effective_to < effective_from:
+            return Response(
+                {'detail': 'Location end date cannot be before start date.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if map_url and not looks_like_url(map_url):
+            extra_location_text = f'{extra_location_text} {map_url}'.strip()
+            map_url = ''
+            data['map_url'] = ''
+        lookup_text = ' '.join(
+            part for part in [address, extra_location_text] if part
+        ).strip()
         coordinates = None
         if map_url:
             coordinates = extract_coordinates_from_map_url(map_url)
-        if coordinates is None and address:
-            coordinates = extract_coordinates_from_map_url(address)
-        if coordinates is None and address:
-            coordinates = geocode_location_text(address)
+        if coordinates is None and lookup_text:
+            coordinates = extract_coordinates_from_map_url(lookup_text)
+        if coordinates is None and lookup_text:
+            coordinates = geocode_location_text(lookup_text)
         if coordinates:
             data['latitude'] = coordinates[0]
             data['longitude'] = coordinates[1]
@@ -1398,7 +1833,7 @@ class AdminAttendanceApiView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        if not user_can_access_dashboard(request.user, 'Admin'):
+        if not user_can_manage_people(request.user):
             raise PermissionDenied
         User = get_user_model()
         employees = User.objects.filter(is_superuser=False)
@@ -1443,12 +1878,12 @@ class AdminAttendanceApiView(APIView):
                             check_out,
                         )
                     )
-            present_user_ids = set(records.filter(event_type=Attendance.CHECK_IN).values_list('user_id', flat=True))
+            present_count = len([row for row in rows if row['status'] == 'Present'])
             return Response({
                 'summary': {
                     'total_employees': employees.count(),
-                    'present': len(present_user_ids),
-                    'absent': max(employees.count() - len(present_user_ids), 0),
+                    'present': present_count,
+                    'absent': max(len(rows) - present_count, 0),
                 },
                 'rows': rows,
             })
@@ -1461,20 +1896,19 @@ class AdminAttendanceApiView(APIView):
         today_records = Attendance.objects.filter(timestamp__date=today).select_related('user')
         if employee_id:
             today_records = today_records.filter(user_id=employee_id)
-        present_user_ids = set(today_records.filter(event_type=Attendance.CHECK_IN).values_list('user_id', flat=True))
         rows = []
         for employee in employees.order_by('username'):
             user_records = today_records.filter(user=employee)
             check_in = user_records.filter(event_type=Attendance.CHECK_IN).order_by('timestamp').first()
             check_out = user_records.filter(event_type=Attendance.CHECK_OUT).order_by('-timestamp').first()
             row = serialize_attendance_admin_row(employee, today, check_in, check_out)
-            row['status'] = 'Present' if employee.id in present_user_ids else 'Absent'
             rows.append(row)
+        present_count = len([row for row in rows if row['status'] == 'Present'])
         return Response({
             'summary': {
                 'total_employees': employees.count(),
-                'present': len(present_user_ids),
-                'absent': max(employees.count() - len(present_user_ids), 0),
+                'present': present_count,
+                'absent': max(employees.count() - present_count, 0),
             },
             'rows': rows,
         })
@@ -1485,7 +1919,7 @@ class AdminTasksApiView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        if not user_can_access_dashboard(request.user, 'Admin'):
+        if not user_can_manage_people(request.user):
             raise PermissionDenied
         tasks = EmployeeTask.objects.select_related('employee')
         status_filter = request.query_params.get('status')
@@ -1654,9 +2088,10 @@ class PasswordResetConfirmView(APIView):
         otp = (request.data.get('otp') or '').strip()
         new_password = request.data.get('new_password') or ''
 
-        if len(new_password) < 6:
+        password_error = password_rule_error(new_password)
+        if password_error:
             return Response(
-                {'detail': 'Password must be at least 6 characters.'},
+                {'detail': password_error},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 

@@ -64,7 +64,11 @@ DATABASES = {
     }
 }
 
-AUTH_PASSWORD_VALIDATORS = []
+AUTH_PASSWORD_VALIDATORS = [
+    {
+        'NAME': 'people.password_rules.HealOnPasswordValidator',
+    },
+]
 
 LANGUAGE_CODE = 'en-us'
 TIME_ZONE = 'Asia/Kolkata'

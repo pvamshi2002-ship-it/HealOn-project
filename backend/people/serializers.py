@@ -8,6 +8,7 @@ from .models import (
     HelpdeskTicket,
     Holiday,
     LeaveRequest,
+    ReimbursementRequest,
     SalaryRecord,
 )
 
@@ -22,6 +23,8 @@ class AssignedLocationSerializer(serializers.ModelSerializer):
             'map_url',
             'coordinates_resolved',
             'radius_meters',
+            'effective_from',
+            'effective_to',
             'is_active',
             'updated_at',
         ]
@@ -41,6 +44,7 @@ class AttendanceSerializer(serializers.ModelSerializer):
             'latitude',
             'longitude',
             'accuracy',
+            'photo_biometric',
             'timestamp',
         ]
         read_only_fields = [
@@ -114,6 +118,7 @@ class LeaveRequestSerializer(serializers.ModelSerializer):
 
 
 class SalaryRecordSerializer(serializers.ModelSerializer):
+    employee_name = serializers.SerializerMethodField()
     gross_salary = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     net_salary = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
 
@@ -121,6 +126,8 @@ class SalaryRecordSerializer(serializers.ModelSerializer):
         model = SalaryRecord
         fields = [
             'id',
+            'employee',
+            'employee_name',
             'year',
             'month',
             'basic_salary',
@@ -134,6 +141,35 @@ class SalaryRecordSerializer(serializers.ModelSerializer):
             'is_published',
         ]
         read_only_fields = fields
+
+    def get_employee_name(self, obj):
+        return obj.employee.get_full_name() or obj.employee.username
+
+
+class ReimbursementRequestSerializer(serializers.ModelSerializer):
+    employee_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ReimbursementRequest
+        fields = [
+            'id',
+            'employee',
+            'employee_name',
+            'expense_date',
+            'reason',
+            'file_name',
+            'pdf_data',
+            'submitted_at',
+        ]
+        read_only_fields = [
+            'id',
+            'employee',
+            'employee_name',
+            'submitted_at',
+        ]
+
+    def get_employee_name(self, obj):
+        return obj.employee.get_full_name() or obj.employee.username
 
 
 class HelpdeskTicketSerializer(serializers.ModelSerializer):

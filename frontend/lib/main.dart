@@ -7,7 +7,16 @@ import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 
 import 'external_link.dart';
+import 'login_storage_stub.dart'
+    if (dart.library.html) 'login_storage_web.dart'
+    as login_storage;
+import 'photo_biometric_stub.dart'
+    if (dart.library.html) 'photo_biometric_web.dart'
+    as photo_biometric;
 import 'payslip_download.dart';
+import 'reimbursement_upload_stub.dart'
+    if (dart.library.html) 'reimbursement_upload_web.dart'
+    as reimbursement_upload;
 
 // For web: use localhost, for mobile: use 10.0.2.2
 final String backendUrl = () {
@@ -18,6 +27,22 @@ final String backendUrl = () {
   }
   return 'http://127.0.0.1:8000'; // For web
 }();
+
+const Color _inkBlue = Color(0xFF172554);
+const Color _brandBlue = Color(0xFF2563EB);
+const Color _brandTeal = Color(0xFF10B981);
+const Color _softSurface = Color(0xFFF8FAFC);
+const Color _lineColor = Color(0xFFE2E8F0);
+
+List<BoxShadow> _softShadow([double alpha = 0.08]) {
+  return [
+    BoxShadow(
+      color: Colors.black.withValues(alpha: alpha),
+      blurRadius: 24,
+      offset: const Offset(0, 12),
+    ),
+  ];
+}
 
 class AttendanceReport {
   AttendanceReport({
@@ -109,19 +134,25 @@ class _HomePageState extends State<HomePage> {
   final _resetOtpCtrl = TextEditingController();
   final _resetPassCtrl = TextEditingController();
   final _helpdeskIssueCtrl = TextEditingController();
+  final _loginHelpdeskIssueCtrl = TextEditingController();
+  final _employeeDisplayNameCtrl = TextEditingController();
   final _employeeFirstNameCtrl = TextEditingController();
   final _employeeLastNameCtrl = TextEditingController();
   final _employeeDobCtrl = TextEditingController();
   final _employeeEmailCtrl = TextEditingController();
+  final _employeePhoneCtrl = TextEditingController();
   final _employeeDepartmentCtrl = TextEditingController();
   final _employeeDesignationCtrl = TextEditingController();
   final _employeeUsernameCtrl = TextEditingController();
   final _employeePasswordCtrl = TextEditingController();
   final _employeeSearchCtrl = TextEditingController();
+  final _reimbursementReasonCtrl = TextEditingController();
+  final _editEmployeeDisplayNameCtrl = TextEditingController();
   final _editEmployeeFirstNameCtrl = TextEditingController();
   final _editEmployeeLastNameCtrl = TextEditingController();
   final _editEmployeeDobCtrl = TextEditingController();
   final _editEmployeeEmailCtrl = TextEditingController();
+  final _editEmployeePhoneCtrl = TextEditingController();
   final _editEmployeeDepartmentCtrl = TextEditingController();
   final _editEmployeeDesignationCtrl = TextEditingController();
   final _editEmployeeUsernameCtrl = TextEditingController();
@@ -137,6 +168,15 @@ class _HomePageState extends State<HomePage> {
   final _regularizationCheckInCtrl = TextEditingController();
   final _regularizationCheckOutCtrl = TextEditingController();
   final _regularizationReasonCtrl = TextEditingController();
+  final _taskReasonCtrl = TextEditingController();
+  final _salaryBasicCtrl = TextEditingController();
+  final _salaryAllowancesCtrl = TextEditingController();
+  final _salaryDeductionsCtrl = TextEditingController();
+  final _salaryTaxCtrl = TextEditingController();
+  final _salaryBonusCtrl = TextEditingController(text: '0');
+  final _salaryIncentivesCtrl = TextEditingController(text: '0');
+  final _bonusAmountCtrl = TextEditingController();
+  final _incentiveAmountCtrl = TextEditingController();
   String _status = '';
   bool _isLoading = false;
   bool _isResetLoading = false;
@@ -151,6 +191,13 @@ class _HomePageState extends State<HomePage> {
   bool _showLocationAssignedPopup = false;
   bool _showPassword = false;
   bool _rememberMe = false;
+  bool _showLoginHelpdesk = false;
+  bool _isApplyingSavedLogin = false;
+  String? _employeeProfilePhotoBiometric;
+  String? _editEmployeeProfilePhotoBiometric;
+  String? _lastAttendancePhotoBiometric;
+  String? _lastAttendanceBiometricMessage;
+  String? _passwordRefillUsername;
   int _resetStep = 0;
   String? _resetMessage;
   String _selectedRole = 'User';
@@ -178,9 +225,27 @@ class _HomePageState extends State<HomePage> {
   Map<String, dynamic>? _selectedSalaryRecord;
   bool _isSalaryDetailsLoading = false;
   String? _salaryDetailsError;
+  DateTime _selectedReimbursementDate = DateTime.now();
+  String? _reimbursementFileName;
+  String? _reimbursementPdfData;
+  bool _isReimbursementLoading = false;
+  List<Map<String, dynamic>> _reimbursements = [];
+  DateTime _selectedAdminReimbursementDate = DateTime.now();
+  bool _isAdminReimbursementLoading = false;
+  List<Map<String, dynamic>> _adminReimbursements = [];
+  String _selectedHrPayrollSection = 'Reimbursement';
+  String _selectedPayrollMonth = _monthName(DateTime.now().month);
+  String _selectedPayrollYear = DateTime.now().year.toString();
+  int? _selectedPayrollEmployeeId;
+  int? _selectedBonusEmployeeId;
+  bool _isPayrollSaving = false;
+  bool _isSalaryRecordsLoading = false;
+  List<Map<String, dynamic>> _adminSalaryRecords = [];
   bool _isTasksLoading = false;
+  bool _isTaskSubmitting = false;
   bool _isHelpdeskLoading = false;
   String _selectedHrSection = 'Staff Directory';
+  String _selectedHrDashboardDetail = '';
   DateTime _selectedReportMonth = DateTime(
     DateTime.now().year,
     DateTime.now().month,
@@ -196,6 +261,7 @@ class _HomePageState extends State<HomePage> {
   Map<String, dynamic>? _adminAttendance;
   Map<String, dynamic>? _adminAttendanceReport;
   Map<String, dynamic>? _adminTasks;
+  Map<String, dynamic>? _selectedAdminAttendanceDetail;
   final Map<String, String> _pendingRequestActions = {};
   List<Map<String, dynamic>> _employeeLeaves = [];
   List<Map<String, dynamic>> _employeeTasks = [];
@@ -204,6 +270,7 @@ class _HomePageState extends State<HomePage> {
   List<dynamic> _adminEmployees = [];
   int? _selectedEditEmployeeId;
   int? _selectedLocationEmployeeId;
+  int? _selectedHrDashboardEmployeeId;
   int? _selectedAdminAttendanceEmployeeId;
   int? _selectedAdminReportEmployeeId;
   DateTime _selectedAdminAttendanceReportMonth = DateTime(
@@ -216,14 +283,50 @@ class _HomePageState extends State<HomePage> {
     DateTime.now().month,
   );
   DateTime? _selectedAdminTaskDate;
+  DateTime? _selectedLocationDate;
+  DateTime? _locationEffectiveFrom;
+  DateTime? _locationEffectiveTo;
+  DateTime _selectedHrDashboardDate = DateTime.now();
   bool _isDashboardLoading = false;
   String? _dashboardError;
+  Map<String, Map<String, String>> _savedLoginDetails = {};
+
+  static const _savedLoginDetailsKey = 'healon_saved_login_details';
+  static const _lastLoginUsernameKey = 'healon_last_login_username';
+  static const _loginHelpdeskIssuesKey = 'healon_login_helpdesk_issues';
 
   bool get _isAdminRole => _selectedRole.trim().toLowerCase() == 'admin';
   bool get _isHrRole => _selectedRole.trim().toLowerCase() == 'hr';
 
+  @override
+  void initState() {
+    super.initState();
+    _loadSavedLoginDetails();
+    _empIdCtrl.addListener(_handleLoginUsernameChanged);
+  }
+
   int _readInt(Map<String, dynamic>? map, String key) {
     return (map?[key] as num?)?.toInt() ?? 0;
+  }
+
+  String _currentDisplayName(String fallback) {
+    final name = _currentUser?['name']?.toString().trim() ?? '';
+    if (name.isNotEmpty && name != '-') return name;
+    final username = _currentUser?['username']?.toString().trim() ?? '';
+    return username.isNotEmpty ? username : fallback;
+  }
+
+  String _dailyPositiveQuote() {
+    const quotes = [
+      'Small steps done well become strong progress.',
+      'Good work today makes tomorrow easier to build.',
+      'Clarity, kindness, and consistency move teams forward.',
+      'Every thoughtful action adds trust to the workplace.',
+      'Progress grows when people feel seen and supported.',
+      'A steady day can still be a powerful day.',
+      'Lead with care, decide with clarity, and keep moving.',
+    ];
+    return quotes[DateTime.now().weekday - 1];
   }
 
   Map<String, dynamic>? _userSection(String key) {
@@ -248,6 +351,129 @@ class _HomePageState extends State<HomePage> {
     }).toList();
   }
 
+  void _loadSavedLoginDetails() {
+    final rawDetails = login_storage.readString(_savedLoginDetailsKey);
+    if (rawDetails != null && rawDetails.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(rawDetails) as Map<String, dynamic>;
+        _savedLoginDetails = decoded.map((username, value) {
+          final details = value as Map<String, dynamic>;
+          return MapEntry(
+            username,
+            details.map((key, item) => MapEntry(key, item.toString())),
+          );
+        });
+      } catch (_) {
+        _savedLoginDetails = {};
+      }
+    }
+
+    final lastUsername = login_storage.readString(_lastLoginUsernameKey);
+    if (lastUsername == null || lastUsername.isEmpty) {
+      return;
+    }
+    final details = _savedLoginDetails[lastUsername];
+    if (details == null) {
+      return;
+    }
+
+    _isApplyingSavedLogin = true;
+    _empIdCtrl.text = lastUsername;
+    _selectedRole = details['role'] ?? _selectedRole;
+    _rememberMe = true;
+    _passwordRefillUsername = lastUsername;
+    _isApplyingSavedLogin = false;
+  }
+
+  void _handleLoginUsernameChanged() {
+    if (_isApplyingSavedLogin) return;
+
+    final username = _empIdCtrl.text.trim();
+    final details = _savedLoginDetails[username];
+    final nextRefillUsername = details == null ? null : username;
+    if (_passwordRefillUsername == nextRefillUsername) return;
+
+    setState(() {
+      _passwordRefillUsername = nextRefillUsername;
+      if (details != null) {
+        _selectedRole = details['role'] ?? _selectedRole;
+        _rememberMe = true;
+      }
+    });
+  }
+
+  void _refillSavedPassword() {
+    final username = _passwordRefillUsername;
+    if (username == null) return;
+    final details = _savedLoginDetails[username];
+    if (details == null) return;
+
+    _isApplyingSavedLogin = true;
+    setState(() {
+      _passCtrl.text = details['password'] ?? '';
+      _selectedRole = details['role'] ?? _selectedRole;
+      _rememberMe = true;
+      _passwordRefillUsername = null;
+    });
+    _isApplyingSavedLogin = false;
+  }
+
+  void _saveCurrentLoginDetails() {
+    final username = _empIdCtrl.text.trim();
+    if (username.isEmpty) return;
+
+    if (_rememberMe) {
+      _savedLoginDetails[username] = {
+        'password': _passCtrl.text,
+        'role': _selectedRole,
+      };
+      login_storage.writeString(
+        _savedLoginDetailsKey,
+        jsonEncode(_savedLoginDetails),
+      );
+      login_storage.writeString(_lastLoginUsernameKey, username);
+    } else {
+      _savedLoginDetails.remove(username);
+      login_storage.writeString(
+        _savedLoginDetailsKey,
+        jsonEncode(_savedLoginDetails),
+      );
+      if (login_storage.readString(_lastLoginUsernameKey) == username) {
+        login_storage.removeString(_lastLoginUsernameKey);
+      }
+    }
+  }
+
+  void _submitLoginHelpdeskIssue() {
+    final issue = _loginHelpdeskIssueCtrl.text.trim();
+    if (issue.isEmpty) {
+      _showNotification('Please enter your issue', isError: true);
+      return;
+    }
+
+    final rawIssues = login_storage.readString(_loginHelpdeskIssuesKey);
+    List<dynamic> issues = [];
+    if (rawIssues != null && rawIssues.isNotEmpty) {
+      try {
+        issues = jsonDecode(rawIssues) as List<dynamic>;
+      } catch (_) {
+        issues = [];
+      }
+    }
+    issues.add({
+      'username': _empIdCtrl.text.trim(),
+      'issue': issue,
+      'created_at': DateTime.now().toIso8601String(),
+    });
+    login_storage.writeString(_loginHelpdeskIssuesKey, jsonEncode(issues));
+
+    setState(() {
+      _loginHelpdeskIssueCtrl.clear();
+      _showLoginHelpdesk = false;
+    });
+    _showNotification('Issue submitted successfully');
+  }
+
   static String _monthName(int month) {
     const monthNames = [
       'January',
@@ -269,25 +495,32 @@ class _HomePageState extends State<HomePage> {
   @override
   void dispose() {
     _leaveSubmitSuccessTimer?.cancel();
+    _empIdCtrl.removeListener(_handleLoginUsernameChanged);
     _empIdCtrl.dispose();
     _passCtrl.dispose();
     _resetMobileCtrl.dispose();
     _resetOtpCtrl.dispose();
     _resetPassCtrl.dispose();
     _helpdeskIssueCtrl.dispose();
+    _loginHelpdeskIssueCtrl.dispose();
+    _employeeDisplayNameCtrl.dispose();
     _employeeFirstNameCtrl.dispose();
     _employeeLastNameCtrl.dispose();
     _employeeDobCtrl.dispose();
     _employeeEmailCtrl.dispose();
+    _employeePhoneCtrl.dispose();
     _employeeDepartmentCtrl.dispose();
     _employeeDesignationCtrl.dispose();
     _employeeUsernameCtrl.dispose();
     _employeePasswordCtrl.dispose();
     _employeeSearchCtrl.dispose();
+    _reimbursementReasonCtrl.dispose();
+    _editEmployeeDisplayNameCtrl.dispose();
     _editEmployeeFirstNameCtrl.dispose();
     _editEmployeeLastNameCtrl.dispose();
     _editEmployeeDobCtrl.dispose();
     _editEmployeeEmailCtrl.dispose();
+    _editEmployeePhoneCtrl.dispose();
     _editEmployeeDepartmentCtrl.dispose();
     _editEmployeeDesignationCtrl.dispose();
     _editEmployeeUsernameCtrl.dispose();
@@ -303,6 +536,15 @@ class _HomePageState extends State<HomePage> {
     _regularizationCheckInCtrl.dispose();
     _regularizationCheckOutCtrl.dispose();
     _regularizationReasonCtrl.dispose();
+    _taskReasonCtrl.dispose();
+    _salaryBasicCtrl.dispose();
+    _salaryAllowancesCtrl.dispose();
+    _salaryDeductionsCtrl.dispose();
+    _salaryTaxCtrl.dispose();
+    _salaryBonusCtrl.dispose();
+    _salaryIncentivesCtrl.dispose();
+    _bonusAmountCtrl.dispose();
+    _incentiveAmountCtrl.dispose();
     super.dispose();
   }
 
@@ -401,6 +643,11 @@ class _HomePageState extends State<HomePage> {
   String _moneyLabel(dynamic value) {
     final amount = double.tryParse(value?.toString() ?? '') ?? 0;
     return 'INR ${amount.toStringAsFixed(2)}';
+  }
+
+  bool _looksLikeUrl(String value) {
+    final uri = Uri.tryParse(value.trim());
+    return uri != null && uri.hasScheme && uri.host.isNotEmpty;
   }
 
   String _monthYearQuery(String monthName, String year) {
@@ -511,10 +758,9 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> confirmPasswordReset(StateSetter dialogSetState) async {
-    if (_resetPassCtrl.text.length < 6) {
-      dialogSetState(
-        () => _resetMessage = 'Password must be at least 6 characters',
-      );
+    final passwordError = _passwordRuleError(_resetPassCtrl.text);
+    if (passwordError != null) {
+      dialogSetState(() => _resetMessage = passwordError);
       return;
     }
 
@@ -543,6 +789,16 @@ class _HomePageState extends State<HomePage> {
         _resetMessage = _responseMessage(resp, 'Unable to reset password');
       });
     }
+  }
+
+  String? _passwordRuleError(String password) {
+    final hasUppercase = RegExp(r'[A-Z]').hasMatch(password);
+    final hasLowercase = RegExp(r'[a-z]').hasMatch(password);
+    final hasNumber = RegExp(r'\d').hasMatch(password);
+    if (password.length < 6 || !hasUppercase || !hasLowercase || !hasNumber) {
+      return 'Password must be at least 6 characters and include 1 uppercase letter, 1 lowercase letter, and 1 number.';
+    }
+    return null;
   }
 
   void _showForgotPasswordDialog() {
@@ -669,7 +925,10 @@ class _HomePageState extends State<HomePage> {
         });
         await _loadAdminTasks();
       } else if (_isHrRole) {
-        final dashboard = await _apiGet('/api/dashboard/');
+        final dashboard = await _apiGet('/api/admin/dashboard/');
+        final employees = await _apiGet('/api/admin/employees/');
+        final attendance = await _apiGet('/api/admin/attendance/');
+        final userDashboard = await _apiGet('/api/dashboard/');
         final leaves = await _apiGet('/api/employee/leaves/');
         final tasks = await _apiGet('/api/employee/tasks/');
         final helpdesk = await _apiGet('/api/employee/helpdesk/');
@@ -678,7 +937,10 @@ class _HomePageState extends State<HomePage> {
           return;
         }
         setState(() {
-          _userDashboard = dashboard;
+          _adminDashboard = dashboard;
+          _adminEmployees = employees?['employees'] as List<dynamic>? ?? [];
+          _adminAttendance = attendance;
+          _userDashboard = userDashboard;
           if (leaves?['summary'] is Map<String, dynamic>) {
             _userDashboard?['leaves'] = leaves?['summary'];
           }
@@ -697,8 +959,9 @@ class _HomePageState extends State<HomePage> {
                   ?.whereType<Map<String, dynamic>>()
                   .toList() ??
               [];
-          _currentUser = dashboard?['user'] as Map<String, dynamic>?;
+          _currentUser = userDashboard?['user'] as Map<String, dynamic>?;
         });
+        await _loadAdminTasks();
       } else {
         final dashboard = await _apiGet('/api/dashboard/');
         final leaves = await _apiGet('/api/employee/leaves/');
@@ -783,7 +1046,44 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  Future<String?> _captureAttendancePhoto(String actionLabel) async {
+    _showNotification('Capture your photo biometric to $actionLabel');
+    final photo = await photo_biometric.pickPhotoBiometric();
+    if (photo == null || photo.isEmpty) {
+      _showNotification(
+        'Photo biometric is required to $actionLabel',
+        isError: true,
+      );
+      return null;
+    }
+    return photo;
+  }
+
+  Future<void> _captureEmployeeProfilePhoto({bool isEdit = false}) async {
+    final photo = await photo_biometric.pickPhotoBiometric();
+    if (photo == null || photo.isEmpty) {
+      _showNotification(
+        'Employee verification photo is required',
+        isError: true,
+      );
+      return;
+    }
+    setState(() {
+      if (isEdit) {
+        _editEmployeeProfilePhotoBiometric = photo;
+      } else {
+        _employeeProfilePhotoBiometric = photo;
+      }
+    });
+    _showNotification('Employee verification photo captured');
+  }
+
   Future<void> checkOut() async {
+    final photo = await _captureAttendancePhoto('check out');
+    if (photo == null) {
+      return;
+    }
+
     final pos = await _getAttendanceLocation('check out');
     if (pos == null) {
       return;
@@ -799,10 +1099,22 @@ class _HomePageState extends State<HomePage> {
         'latitude': pos.latitude.toStringAsFixed(6),
         'longitude': pos.longitude.toStringAsFixed(6),
         'accuracy': pos.accuracy,
+        'photo_biometric': photo,
       }),
     );
     if (resp.statusCode == 201) {
-      _showNotification('Checked out successfully');
+      final details = _attendanceBiometricDetails(resp.body);
+      setState(() {
+        _lastAttendancePhotoBiometric = photo;
+        _lastAttendanceBiometricMessage = details.isEmpty
+            ? 'Check-out photo biometric captured'
+            : 'Check-out $details';
+      });
+      _showNotification(
+        details.isEmpty
+            ? 'Checked out successfully'
+            : 'Checked out successfully - $details',
+      );
       await loadDashboardData();
       if (_selectedMenu == 'Attendance') {
         await loadAttendanceReport();
@@ -855,9 +1167,12 @@ class _HomePageState extends State<HomePage> {
           _currentUser = user;
           _selectedRole = requestedRole;
           _selectedMenu = 'Dashboard';
-          _selectedHrSection = 'Staff Directory';
+          _selectedHrDashboardDetail = '';
+          _selectedAttendanceSection = 'Add Employee';
+          _selectedHrSection = 'Add Employee';
           _status = 'Logged in successfully';
         });
+        _saveCurrentLoginDetails();
         await loadDashboardData();
         // Auto-clear status after 1.5 seconds
         Future.delayed(const Duration(milliseconds: 1500), () {
@@ -1100,23 +1415,10 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _showRegularizationCcPicker() async {
-    if (_employeeDirectory.isEmpty) {
-      try {
-        final directory = await _apiGet('/api/employee/directory/');
-        if (!mounted) return;
-        setState(() {
-          _employeeDirectory =
-              directory?['employees']
-                  ?.whereType<Map<String, dynamic>>()
-                  .toList() ??
-              [];
-        });
-      } catch (e) {
-        _showNotification('Unable to load employees: $e', isError: true);
-        return;
-      }
-    }
+    final loaded = await _ensureEmployeeDirectoryLoaded();
+    if (!loaded) return;
     if (!mounted) return;
+    var query = '';
     showDialog<void>(
       context: context,
       builder: (dialogContext) {
@@ -1124,47 +1426,94 @@ class _HomePageState extends State<HomePage> {
           title: const Text('Select CC Employee'),
           content: SizedBox(
             width: 360,
-            child: _employeeDirectory.isEmpty
-                ? const Text('No other employees found.')
-                : ConstrainedBox(
-                    constraints: const BoxConstraints(maxHeight: 360),
-                    child: ListView.separated(
-                      shrinkWrap: true,
-                      itemCount: _employeeDirectory.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
-                      itemBuilder: (context, index) {
-                        final employee = _employeeDirectory[index];
-                        final name =
-                            employee['name']?.toString().trim().isNotEmpty ==
-                                true
-                            ? employee['name'].toString()
-                            : employee['username']?.toString() ?? 'Employee';
-                        final employeeId =
-                            employee['employee_id']?.toString() ??
-                            employee['username']?.toString() ??
-                            '';
-                        final role = employee['role']?.toString() ?? '';
-                        return ListTile(
-                          leading: const CircleAvatar(
-                            child: Icon(Icons.person_outline),
-                          ),
-                          title: Text(name),
-                          subtitle: Text(
-                            [
-                              if (employeeId.isNotEmpty) employeeId,
-                              if (role.isNotEmpty) role,
-                            ].join(' · '),
-                          ),
-                          onTap: () {
-                            setState(() {
-                              _regularizationCcCtrl.text = name;
-                            });
-                            Navigator.of(dialogContext).pop();
-                          },
-                        );
-                      },
+            child: StatefulBuilder(
+              builder: (context, setDialogState) {
+                final filteredEmployees = _employeeDirectory.where((employee) {
+                  final name =
+                      employee['name']?.toString().trim().isNotEmpty == true
+                      ? employee['name'].toString()
+                      : employee['username']?.toString() ?? 'Employee';
+                  final username = employee['username']?.toString() ?? '';
+                  final employeeId = employee['employee_id']?.toString() ?? '';
+                  final role = employee['role']?.toString() ?? '';
+                  final haystack = '$name $username $employeeId $role'
+                      .toLowerCase();
+                  return haystack.contains(query.toLowerCase().trim());
+                }).toList();
+
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      autofocus: true,
+                      decoration: const InputDecoration(
+                        prefixIcon: Icon(Icons.search),
+                        hintText: 'Search employees',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      onChanged: (value) => setDialogState(() => query = value),
                     ),
-                  ),
+                    const SizedBox(height: 12),
+                    if (_employeeDirectory.isEmpty)
+                      const Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text('No other employees found.'),
+                      )
+                    else if (filteredEmployees.isEmpty)
+                      const Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text('No employees match your search.'),
+                      )
+                    else
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxHeight: 320),
+                        child: ListView.separated(
+                          shrinkWrap: true,
+                          itemCount: filteredEmployees.length,
+                          separatorBuilder: (_, __) => const Divider(height: 1),
+                          itemBuilder: (context, index) {
+                            final employee = filteredEmployees[index];
+                            final name =
+                                employee['name']
+                                        ?.toString()
+                                        .trim()
+                                        .isNotEmpty ==
+                                    true
+                                ? employee['name'].toString()
+                                : employee['username']?.toString() ??
+                                      'Employee';
+                            final employeeId =
+                                employee['employee_id']?.toString() ??
+                                employee['username']?.toString() ??
+                                '';
+                            final role = employee['role']?.toString() ?? '';
+                            return ListTile(
+                              dense: true,
+                              leading: const CircleAvatar(
+                                child: Icon(Icons.person_outline),
+                              ),
+                              title: Text(name),
+                              subtitle: Text(
+                                [
+                                  if (employeeId.isNotEmpty) employeeId,
+                                  if (role.isNotEmpty) role,
+                                ].join(' · '),
+                              ),
+                              onTap: () {
+                                setState(() {
+                                  _regularizationCcCtrl.text = name;
+                                });
+                                Navigator.of(dialogContext).pop();
+                              },
+                            );
+                          },
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
           ),
           actions: [
             TextButton(
@@ -1185,6 +1534,25 @@ class _HomePageState extends State<HomePage> {
         );
       },
     );
+  }
+
+  Future<bool> _ensureEmployeeDirectoryLoaded() async {
+    if (_employeeDirectory.isNotEmpty) return true;
+    try {
+      final directory = await _apiGet('/api/employee/directory/');
+      if (!mounted) return false;
+      setState(() {
+        _employeeDirectory =
+            directory?['employees']
+                ?.whereType<Map<String, dynamic>>()
+                .toList() ??
+            [];
+      });
+      return true;
+    } catch (e) {
+      _showNotification('Unable to load employees: $e', isError: true);
+      return false;
+    }
   }
 
   Future<Map<String, dynamic>?> _fetchSelectedPayslip() async {
@@ -1379,25 +1747,339 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  Future<void> _pickReimbursementPdf() async {
+    final upload = await reimbursement_upload.pickReimbursementPdf();
+    if (upload == null) {
+      _showNotification('Select a PDF reimbursement file', isError: true);
+      return;
+    }
+    setState(() {
+      _reimbursementFileName = upload.fileName;
+      _reimbursementPdfData = upload.dataUrl;
+    });
+  }
+
+  Future<void> _pickReimbursementDate({bool admin = false}) async {
+    final current = admin
+        ? _selectedAdminReimbursementDate
+        : _selectedReimbursementDate;
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: current,
+      firstDate: DateTime(DateTime.now().year - 5),
+      lastDate: DateTime(DateTime.now().year + 1),
+    );
+    if (picked == null) return;
+    setState(() {
+      if (admin) {
+        _selectedAdminReimbursementDate = picked;
+      } else {
+        _selectedReimbursementDate = picked;
+      }
+    });
+    if (admin) {
+      await _loadAdminReimbursements();
+    } else {
+      await _loadReimbursements();
+    }
+  }
+
+  Future<void> _loadReimbursements() async {
+    if (_token == null) return;
+    setState(() => _isReimbursementLoading = true);
+    try {
+      final resp = await http.get(
+        Uri.parse(
+          '$backendUrl/api/employee/reimbursements/?date=${_dateQuery(_selectedReimbursementDate)}',
+        ),
+        headers: {'Authorization': 'Token $_token'},
+      );
+      if (resp.statusCode == 200) {
+        final decoded = jsonDecode(resp.body) as Map<String, dynamic>;
+        setState(() {
+          _reimbursements = (decoded['reimbursements'] as List<dynamic>? ?? [])
+              .whereType<Map<String, dynamic>>()
+              .toList();
+        });
+      } else {
+        _showNotification(
+          _responseMessage(resp, 'Unable to load reimbursements'),
+          isError: true,
+        );
+      }
+    } catch (e) {
+      _showNotification('Unable to load reimbursements: $e', isError: true);
+    } finally {
+      if (mounted) setState(() => _isReimbursementLoading = false);
+    }
+  }
+
+  Future<void> _submitReimbursement() async {
+    final reason = _reimbursementReasonCtrl.text.trim();
+    if (_reimbursementPdfData == null || _reimbursementFileName == null) {
+      _showNotification('Upload a PDF file', isError: true);
+      return;
+    }
+    if (reason.isEmpty) {
+      _showNotification('Enter reimbursement reason', isError: true);
+      return;
+    }
+
+    setState(() => _isReimbursementLoading = true);
+    try {
+      final resp = await http.post(
+        Uri.parse('$backendUrl/api/employee/reimbursements/'),
+        headers: {
+          'Content-Type': 'application/json',
+          if (_token != null) 'Authorization': 'Token $_token',
+        },
+        body: jsonEncode({
+          'expense_date': _dateQuery(_selectedReimbursementDate),
+          'reason': reason,
+          'file_name': _reimbursementFileName,
+          'pdf_data': _reimbursementPdfData,
+        }),
+      );
+      if (resp.statusCode == 201) {
+        _showNotification('Reimbursement submitted');
+        _reimbursementReasonCtrl.clear();
+        setState(() {
+          _reimbursementFileName = null;
+          _reimbursementPdfData = null;
+        });
+        await _loadReimbursements();
+      } else {
+        _showNotification(
+          _responseMessage(resp, 'Unable to submit reimbursement'),
+          isError: true,
+        );
+      }
+    } catch (e) {
+      _showNotification('Unable to submit reimbursement: $e', isError: true);
+    } finally {
+      if (mounted) setState(() => _isReimbursementLoading = false);
+    }
+  }
+
+  Future<void> _loadAdminReimbursements() async {
+    if (_token == null) return;
+    setState(() => _isAdminReimbursementLoading = true);
+    try {
+      final resp = await http.get(
+        Uri.parse(
+          '$backendUrl/api/admin/reimbursements/?date=${_dateQuery(_selectedAdminReimbursementDate)}',
+        ),
+        headers: {'Authorization': 'Token $_token'},
+      );
+      if (resp.statusCode == 200) {
+        final decoded = jsonDecode(resp.body) as Map<String, dynamic>;
+        setState(() {
+          _adminReimbursements =
+              (decoded['reimbursements'] as List<dynamic>? ?? [])
+                  .whereType<Map<String, dynamic>>()
+                  .toList();
+        });
+      } else {
+        _showNotification(
+          _responseMessage(resp, 'Unable to load reimbursements'),
+          isError: true,
+        );
+      }
+    } catch (e) {
+      _showNotification('Unable to load reimbursements: $e', isError: true);
+    } finally {
+      if (mounted) setState(() => _isAdminReimbursementLoading = false);
+    }
+  }
+
+  Future<void> _loadAdminSalaryRecords() async {
+    if (_token == null) return;
+    setState(() => _isSalaryRecordsLoading = true);
+    try {
+      final query = StringBuffer(
+        '?month=${_monthNumber(_selectedPayrollMonth)}&year=$_selectedPayrollYear',
+      );
+      final resp = await http.get(
+        Uri.parse('$backendUrl/api/admin/salary-records/$query'),
+        headers: {'Authorization': 'Token $_token'},
+      );
+      if (resp.statusCode == 200) {
+        final decoded = jsonDecode(resp.body) as Map<String, dynamic>;
+        setState(() {
+          _adminSalaryRecords =
+              (decoded['salary_records'] as List<dynamic>? ?? [])
+                  .whereType<Map<String, dynamic>>()
+                  .toList();
+        });
+      } else {
+        _showNotification(
+          _responseMessage(resp, 'Unable to load salary records'),
+          isError: true,
+        );
+      }
+    } catch (e) {
+      _showNotification('Unable to load salary records: $e', isError: true);
+    } finally {
+      if (mounted) setState(() => _isSalaryRecordsLoading = false);
+    }
+  }
+
+  Future<void> _saveSalaryRecord({bool bonusOnly = false}) async {
+    final employeeId = bonusOnly
+        ? _selectedBonusEmployeeId
+        : _selectedPayrollEmployeeId;
+    if (_token == null || employeeId == null) {
+      _showNotification('Select an employee', isError: true);
+      return;
+    }
+    final existing = _salaryRecordForEmployee(employeeId);
+    if (bonusOnly && existing == null) {
+      _showNotification(
+        'Create salary structure for this employee first',
+        isError: true,
+      );
+      return;
+    }
+
+    setState(() => _isPayrollSaving = true);
+    try {
+      final body = bonusOnly
+          ? {
+              ...?existing,
+              'employee_id': employeeId,
+              'year': _selectedPayrollYear,
+              'month': _monthNumber(_selectedPayrollMonth),
+              'bonus': _bonusAmountCtrl.text.trim(),
+              'incentives': _incentiveAmountCtrl.text.trim(),
+              'is_published': true,
+            }
+          : {
+              'employee_id': employeeId,
+              'year': _selectedPayrollYear,
+              'month': _monthNumber(_selectedPayrollMonth),
+              'basic_salary': _salaryBasicCtrl.text.trim(),
+              'allowances': _salaryAllowancesCtrl.text.trim(),
+              'deductions': _salaryDeductionsCtrl.text.trim(),
+              'tax_deducted': _salaryTaxCtrl.text.trim(),
+              'bonus': _salaryBonusCtrl.text.trim(),
+              'incentives': _salaryIncentivesCtrl.text.trim(),
+              'is_published': true,
+            };
+      final resp = await http.post(
+        Uri.parse('$backendUrl/api/admin/salary-records/'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Token $_token',
+        },
+        body: jsonEncode(body),
+      );
+      if (resp.statusCode == 201) {
+        _showNotification(
+          bonusOnly
+              ? 'Bonus and incentives updated'
+              : 'Salary structure saved and payslip generated',
+        );
+        if (!bonusOnly) {
+          _salaryBasicCtrl.clear();
+          _salaryAllowancesCtrl.clear();
+          _salaryDeductionsCtrl.clear();
+          _salaryTaxCtrl.clear();
+          _salaryBonusCtrl.text = '0';
+          _salaryIncentivesCtrl.text = '0';
+        } else {
+          _bonusAmountCtrl.clear();
+          _incentiveAmountCtrl.clear();
+        }
+        await _loadAdminSalaryRecords();
+      } else {
+        _showNotification(
+          _responseMessage(resp, 'Unable to save salary record'),
+          isError: true,
+        );
+      }
+    } catch (e) {
+      _showNotification('Unable to save salary record: $e', isError: true);
+    } finally {
+      if (mounted) setState(() => _isPayrollSaving = false);
+    }
+  }
+
+  Map<String, dynamic>? _salaryRecordForEmployee(int employeeId) {
+    for (final record in _adminSalaryRecords) {
+      final recordEmployeeId = (record['employee'] as num?)?.toInt();
+      if (recordEmployeeId == employeeId) return record;
+    }
+    return null;
+  }
+
+  void _downloadReimbursementPdf(Map<String, dynamic> reimbursement) {
+    final pdfData = reimbursement['pdf_data']?.toString() ?? '';
+    final fileName =
+        reimbursement['file_name']?.toString().trim().isNotEmpty == true
+        ? reimbursement['file_name'].toString().trim()
+        : 'reimbursement.pdf';
+    final payload = pdfData.startsWith('data:application/pdf;base64,')
+        ? pdfData.substring(pdfData.indexOf(',') + 1)
+        : '';
+
+    if (payload.isEmpty) {
+      _showNotification('No reimbursement document found', isError: true);
+      return;
+    }
+
+    try {
+      downloadPdfFile(base64Decode(payload), fileName);
+      _showNotification('Reimbursement document downloaded');
+    } catch (e) {
+      _showNotification('Unable to download reimbursement: $e', isError: true);
+    }
+  }
+
   Future<void> _registerEmployee() async {
-    final firstName = _employeeFirstNameCtrl.text.trim();
-    final lastName = _employeeLastNameCtrl.text.trim();
+    var displayName = _employeeDisplayNameCtrl.text.trim();
+    var firstName = _employeeFirstNameCtrl.text.trim();
+    var lastName = _employeeLastNameCtrl.text.trim();
     final dateOfBirth = _employeeDobCtrl.text.trim();
     final email = _employeeEmailCtrl.text.trim();
+    final phone = _employeePhoneCtrl.text.trim();
     final username = _employeeUsernameCtrl.text.trim();
     final password = _employeePasswordCtrl.text;
     final department = _employeeDepartmentCtrl.text.trim();
     final designation = _employeeDesignationCtrl.text.trim();
 
-    if (firstName.isEmpty ||
-        lastName.isEmpty ||
+    if (displayName.isEmpty && firstName.isNotEmpty) {
+      displayName = [
+        firstName,
+        lastName,
+      ].where((part) => part.isNotEmpty).join(' ');
+    }
+    if ((firstName.isEmpty || lastName.isEmpty) && displayName.isNotEmpty) {
+      final parts = displayName.split(RegExp(r'\s+'));
+      firstName = firstName.isEmpty ? parts.first : firstName;
+      if (lastName.isEmpty && parts.length > 1) {
+        lastName = parts.sublist(1).join(' ');
+      }
+    }
+
+    if (displayName.isEmpty ||
+        firstName.isEmpty ||
         email.isEmpty ||
         username.isEmpty ||
         password.isEmpty) {
       _showNotification(
-        'First name, last name, email, username, and password are required',
+        'Display name, email, username, and password are required',
         isError: true,
       );
+      return;
+    }
+    final passwordError = _passwordRuleError(password);
+    if (passwordError != null) {
+      _showNotification(passwordError, isError: true);
+      return;
+    }
+    if (_employeeProfilePhotoBiometric == null ||
+        _employeeProfilePhotoBiometric!.isEmpty) {
+      _showNotification('Capture employee verification photo', isError: true);
       return;
     }
     if (!_employeeCanAccessUser &&
@@ -1419,10 +2101,13 @@ class _HomePageState extends State<HomePage> {
           if (_token != null) 'Authorization': 'Token $_token',
         },
         body: jsonEncode({
+          'name': displayName,
           'first_name': firstName,
           'last_name': lastName,
           'date_of_birth': dateOfBirth,
           'email': email,
+          'mobile_number': phone,
+          'profile_photo_biometric': _employeeProfilePhotoBiometric,
           'username': username,
           'password': password,
           'department': department,
@@ -1434,10 +2119,13 @@ class _HomePageState extends State<HomePage> {
       );
 
       if (resp.statusCode == 201) {
+        _employeeDisplayNameCtrl.clear();
         _employeeFirstNameCtrl.clear();
         _employeeLastNameCtrl.clear();
         _employeeDobCtrl.clear();
         _employeeEmailCtrl.clear();
+        _employeePhoneCtrl.clear();
+        _employeeProfilePhotoBiometric = null;
         _employeeUsernameCtrl.clear();
         _employeePasswordCtrl.clear();
         _employeeDepartmentCtrl.clear();
@@ -1496,11 +2184,15 @@ class _HomePageState extends State<HomePage> {
     );
     setState(() {
       _selectedEditEmployeeId = employeeId;
+      _editEmployeeDisplayNameCtrl.text = employee['name']?.toString() ?? '';
       _editEmployeeFirstNameCtrl.text =
           employee['first_name']?.toString() ?? '';
       _editEmployeeLastNameCtrl.text = employee['last_name']?.toString() ?? '';
       _editEmployeeDobCtrl.text = employee['date_of_birth']?.toString() ?? '';
       _editEmployeeEmailCtrl.text = employee['email']?.toString() ?? '';
+      _editEmployeePhoneCtrl.text = employee['mobile_number']?.toString() ?? '';
+      _editEmployeeProfilePhotoBiometric = employee['profile_photo_biometric']
+          ?.toString();
       _editEmployeeUsernameCtrl.text = employee['username']?.toString() ?? '';
       _editEmployeeDepartmentCtrl.text =
           employee['department']?.toString() ?? '';
@@ -1526,17 +2218,33 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
-    final firstName = _editEmployeeFirstNameCtrl.text.trim();
-    final lastName = _editEmployeeLastNameCtrl.text.trim();
+    var displayName = _editEmployeeDisplayNameCtrl.text.trim();
+    var firstName = _editEmployeeFirstNameCtrl.text.trim();
+    var lastName = _editEmployeeLastNameCtrl.text.trim();
     final dateOfBirth = _editEmployeeDobCtrl.text.trim();
     final email = _editEmployeeEmailCtrl.text.trim();
+    final phone = _editEmployeePhoneCtrl.text.trim();
     final username = _editEmployeeUsernameCtrl.text.trim();
-    if (firstName.isEmpty ||
-        lastName.isEmpty ||
+    if (displayName.isEmpty && firstName.isNotEmpty) {
+      displayName = [
+        firstName,
+        lastName,
+      ].where((part) => part.isNotEmpty).join(' ');
+    }
+    if ((firstName.isEmpty || lastName.isEmpty) && displayName.isNotEmpty) {
+      final parts = displayName.split(RegExp(r'\s+'));
+      firstName = firstName.isEmpty ? parts.first : firstName;
+      if (lastName.isEmpty && parts.length > 1) {
+        lastName = parts.sublist(1).join(' ');
+      }
+    }
+
+    if (displayName.isEmpty ||
+        firstName.isEmpty ||
         email.isEmpty ||
         username.isEmpty) {
       _showNotification(
-        'First name, last name, email, and username are required',
+        'Display name, email, and username are required',
         isError: true,
       );
       return;
@@ -1554,10 +2262,14 @@ class _HomePageState extends State<HomePage> {
     setState(() => _isEmployeeSaving = true);
     try {
       final body = <String, dynamic>{
+        'name': displayName,
         'first_name': firstName,
         'last_name': lastName,
         'date_of_birth': dateOfBirth,
         'email': email,
+        'mobile_number': phone,
+        if (_editEmployeeProfilePhotoBiometric?.isNotEmpty == true)
+          'profile_photo_biometric': _editEmployeeProfilePhotoBiometric,
         'username': username,
         'department': _editEmployeeDepartmentCtrl.text.trim(),
         'designation': _editEmployeeDesignationCtrl.text.trim(),
@@ -1568,6 +2280,12 @@ class _HomePageState extends State<HomePage> {
       };
       final password = _editEmployeePasswordCtrl.text;
       if (password.isNotEmpty) {
+        final passwordError = _passwordRuleError(password);
+        if (passwordError != null) {
+          _showNotification(passwordError, isError: true);
+          setState(() => _isEmployeeSaving = false);
+          return;
+        }
         body['password'] = password;
       }
 
@@ -1595,6 +2313,128 @@ class _HomePageState extends State<HomePage> {
     } finally {
       if (mounted) {
         setState(() => _isEmployeeSaving = false);
+      }
+    }
+  }
+
+  Future<void> _confirmDeleteEmployee(Map<String, dynamic> employee) async {
+    final employeeId = _employeeId(employee);
+    if (employeeId == 0) {
+      _showNotification('Select an employee first', isError: true);
+      return;
+    }
+    final employeeName = employee['name']?.toString() ?? 'this employee';
+    final shouldDelete = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Delete Employee'),
+          content: Text(
+            'Delete $employeeName? This will remove the employee from the system.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              icon: const Icon(Icons.delete),
+              label: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+    if (shouldDelete != true) return;
+    await _deleteEmployee(employeeId);
+  }
+
+  Future<void> _deleteEmployee(int employeeId) async {
+    setState(() => _isEmployeeSaving = true);
+    try {
+      final resp = await http.delete(
+        Uri.parse('$backendUrl/api/admin/employees/$employeeId/'),
+        headers: {if (_token != null) 'Authorization': 'Token $_token'},
+      );
+
+      if (resp.statusCode == 204 || resp.statusCode == 200) {
+        _showNotification('Employee deleted');
+        setState(() {
+          _selectedEditEmployeeId = null;
+          _editEmployeeDisplayNameCtrl.clear();
+          _editEmployeeFirstNameCtrl.clear();
+          _editEmployeeLastNameCtrl.clear();
+          _editEmployeeDobCtrl.clear();
+          _editEmployeeEmailCtrl.clear();
+          _editEmployeePhoneCtrl.clear();
+          _editEmployeeProfilePhotoBiometric = null;
+          _editEmployeeDepartmentCtrl.clear();
+          _editEmployeeDesignationCtrl.clear();
+          _editEmployeeUsernameCtrl.clear();
+          _editEmployeePasswordCtrl.clear();
+        });
+        await loadDashboardData();
+      } else {
+        _showNotification(
+          _responseMessage(resp, 'Unable to delete employee'),
+          isError: true,
+        );
+      }
+    } catch (e) {
+      _showNotification('Unable to delete employee: $e', isError: true);
+    } finally {
+      if (mounted) {
+        setState(() => _isEmployeeSaving = false);
+      }
+    }
+  }
+
+  Future<void> _submitTaskReason() async {
+    final task = _employeeTasks.firstWhere((item) {
+      final status = item['status']?.toString() ?? '';
+      return status == 'assigned' ||
+          status == 'in_progress' ||
+          status == 'review';
+    }, orElse: () => <String, dynamic>{});
+    final taskId = (task['id'] as num?)?.toInt() ?? 0;
+    final reason = _taskReasonCtrl.text.trim();
+    if (taskId == 0) {
+      _showNotification('No pending task selected', isError: true);
+      return;
+    }
+    if (reason.isEmpty) {
+      _showNotification('Enter a reason before submitting', isError: true);
+      return;
+    }
+
+    setState(() => _isTaskSubmitting = true);
+    try {
+      final resp = await http.post(
+        Uri.parse('$backendUrl/api/employee/tasks/'),
+        headers: {
+          'Content-Type': 'application/json',
+          if (_token != null) 'Authorization': 'Token $_token',
+        },
+        body: jsonEncode({'task_id': taskId, 'reason': reason}),
+      );
+      if (resp.statusCode == 200) {
+        _showNotification('Task submitted to admin');
+        _taskReasonCtrl.clear();
+        await loadDashboardData();
+        await _loadSelectedTasks();
+      } else {
+        _showNotification(
+          _responseMessage(resp, 'Unable to submit task'),
+          isError: true,
+        );
+      }
+    } catch (e) {
+      _showNotification('Unable to submit task: $e', isError: true);
+    } finally {
+      if (mounted) {
+        setState(() => _isTaskSubmitting = false);
       }
     }
   }
@@ -1668,25 +2508,42 @@ class _HomePageState extends State<HomePage> {
       _locationMapLinkCtrl.text = location?['map_url']?.toString() ?? '';
       _locationRadiusCtrl.text =
           location?['radius_meters']?.toString() ?? '100';
+      _locationEffectiveFrom = DateTime.tryParse(
+        location?['effective_from']?.toString() ?? '',
+      );
+      _locationEffectiveTo = DateTime.tryParse(
+        location?['effective_to']?.toString() ?? '',
+      );
     });
   }
 
   Future<void> _saveEmployeeLocation() async {
     final employeeId = _selectedLocationEmployeeId;
     final address = _locationAddressCtrl.text.trim();
-    final mapLink = _locationMapLinkCtrl.text.trim();
+    final mapOrExtraAddress = _locationMapLinkCtrl.text.trim();
+    final savedAddress = address.isNotEmpty ? address : mapOrExtraAddress;
+    final mapLink = _looksLikeUrl(mapOrExtraAddress) ? mapOrExtraAddress : '';
     final radius = int.tryParse(_locationRadiusCtrl.text.trim()) ?? 100;
 
     if (employeeId == null || employeeId == 0) {
       _showNotification('Select an employee first', isError: true);
       return;
     }
-    if (address.isEmpty) {
+    if (savedAddress.isEmpty) {
       _showNotification('Enter the assigned work address', isError: true);
       return;
     }
     if (radius <= 0) {
       _showNotification('Radius must be greater than 0', isError: true);
+      return;
+    }
+    if (_locationEffectiveFrom != null &&
+        _locationEffectiveTo != null &&
+        _locationEffectiveTo!.isBefore(_locationEffectiveFrom!)) {
+      _showNotification(
+        'Location end date cannot be before start date',
+        isError: true,
+      );
       return;
     }
 
@@ -1700,9 +2557,16 @@ class _HomePageState extends State<HomePage> {
         },
         body: jsonEncode({
           'name': 'Work Location',
-          'address': address,
+          'address': savedAddress,
           'map_url': mapLink,
+          'extra_location_text': mapOrExtraAddress,
           'radius_meters': radius,
+          'effective_from': _locationEffectiveFrom == null
+              ? null
+              : _dateQuery(_locationEffectiveFrom!),
+          'effective_to': _locationEffectiveTo == null
+              ? null
+              : _dateQuery(_locationEffectiveTo!),
           'is_active': true,
         }),
       );
@@ -1735,6 +2599,11 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> checkIn() async {
+    final photo = await _captureAttendancePhoto('check in');
+    if (photo == null) {
+      return;
+    }
+
     final pos = await _getAttendanceLocation('check in');
     if (pos == null) {
       return;
@@ -1750,10 +2619,22 @@ class _HomePageState extends State<HomePage> {
         'latitude': pos.latitude.toStringAsFixed(6),
         'longitude': pos.longitude.toStringAsFixed(6),
         'accuracy': pos.accuracy,
+        'photo_biometric': photo,
       }),
     );
     if (resp.statusCode == 201) {
-      _showNotification('Checked in successfully');
+      final details = _attendanceBiometricDetails(resp.body);
+      setState(() {
+        _lastAttendancePhotoBiometric = photo;
+        _lastAttendanceBiometricMessage = details.isEmpty
+            ? 'Check-in photo biometric captured'
+            : 'Check-in $details';
+      });
+      _showNotification(
+        details.isEmpty
+            ? 'Checked in successfully'
+            : 'Checked in successfully - $details',
+      );
       await loadDashboardData();
       if (_selectedMenu == 'Attendance') {
         await loadAttendanceReport();
@@ -1775,6 +2656,21 @@ class _HomePageState extends State<HomePage> {
       }
     } catch (_) {}
     return 'Please try again';
+  }
+
+  String _attendanceBiometricDetails(String body) {
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map<String, dynamic>) {
+        final details = decoded['biometric_details'];
+        if (details is Map<String, dynamic> &&
+            details['verified'] == true &&
+            details['size_bytes'] != null) {
+          return 'photo biometric verified';
+        }
+      }
+    } catch (_) {}
+    return '';
   }
 
   Future<void> loadAttendanceReport() async {
@@ -1889,20 +2785,37 @@ class _HomePageState extends State<HomePage> {
       if (menuKey == 'Attendance') {
         _selectedAttendanceSection = 'Daily Attendance';
         _selectedAdminAttendanceSection = 'Daily Attendances';
+        _selectedAdminAttendanceDetail = null;
+        if (_isHrRole) {
+          _selectedHrSection = 'Daily Attendance';
+        }
+        _selectedHrDashboardDetail = '';
       } else if (menuKey == 'Tasks') {
         _selectedTaskSection = 'Pending Tasks';
       } else if (menuKey == 'Leaves') {
         _selectedLeaveSection = 'Apply Leave';
+        if (_isHrRole) {
+          _selectedHrSection = 'Leaves';
+          _selectedHrDashboardDetail = '';
+        }
       } else if (menuKey == 'Salary') {
         _selectedSalarySection = 'Payslips';
       } else if (menuKey == 'Employee Management') {
         if (_isAdminRole) {
           _selectedAttendanceSection = 'Edit Employee';
         } else {
-          _selectedHrSection = 'Staff Directory';
+          _selectedAttendanceSection = 'Add Employee';
+          _selectedHrSection = 'Add Employee';
         }
+        _selectedHrDashboardDetail = '';
+      } else if (menuKey == 'Employee Location') {
+        _selectedAttendanceSection = 'Add Location';
+        _selectedHrSection = 'Add Location';
+        _selectedLocationDate = null;
+        _selectedHrDashboardDetail = '';
       } else if (menuKey == 'Smart Location Management') {
         _selectedAttendanceSection = 'Edit Location';
+        _selectedLocationDate = null;
       } else if (menuKey == 'Work Monitoring') {
         _selectedAdminTaskStatus = 'assigned';
       } else if (menuKey == 'Pending Requests') {
@@ -1915,18 +2828,27 @@ class _HomePageState extends State<HomePage> {
         _selectedHrSection = 'Job Openings';
       } else if (menuKey == 'Payroll') {
         _selectedHrSection = 'Salary Management';
+      } else if (menuKey == 'Employee Payroll') {
+        _selectedHrSection = 'Employee Payroll';
+        _selectedHrPayrollSection = 'Reimbursement';
+        _selectedHrDashboardDetail = '';
       } else if (menuKey == 'Performance') {
         _selectedHrSection = 'Performance Tracker';
       }
     });
     if (menuKey == 'Attendance') {
       loadAttendanceReport();
-      if (_isAdminRole && _selectedAttendanceSection == 'Attendance Reports') {
+      if ((_isAdminRole || _isHrRole) &&
+          _selectedAttendanceSection == 'Attendance Reports') {
         _loadAdminAttendanceReport();
       }
     }
     if (menuKey == 'Work Monitoring') {
       _loadAdminTasks();
+    }
+    if (menuKey == 'Employee Payroll') {
+      _loadAdminReimbursements();
+      _loadAdminSalaryRecords();
     }
     if (menuKey == 'Helpdesk' || menuKey == 'Help Desk') {
       _loadSelectedHelpdeskTickets();
@@ -1934,7 +2856,10 @@ class _HomePageState extends State<HomePage> {
     if (menuKey == 'Dashboard' ||
         menuKey == 'Employees' ||
         menuKey == 'Attendance' ||
-        menuKey == 'Pending Requests') {
+        menuKey == 'Pending Requests' ||
+        menuKey == 'Employee Management' ||
+        menuKey == 'Employee Location' ||
+        menuKey == 'Leaves') {
       loadDashboardData();
     }
   }
@@ -1978,6 +2903,22 @@ class _HomePageState extends State<HomePage> {
       _selectedMenu = 'Salary';
       _selectedSalarySection = section;
     });
+    if (section == 'Reimbursement') {
+      _loadReimbursements();
+    }
+  }
+
+  void _selectHrPayrollSection(String section) {
+    setState(() {
+      _selectedMenu = 'Employee Payroll';
+      _selectedHrSection = 'Employee Payroll';
+      _selectedHrPayrollSection = section;
+    });
+    if (section == 'Reimbursement') {
+      _loadAdminReimbursements();
+    } else {
+      _loadAdminSalaryRecords();
+    }
   }
 
   void _selectHrSection(String menu, String section) {
@@ -2114,6 +3055,10 @@ class _HomePageState extends State<HomePage> {
     return '${date.day} ${monthNames[date.month - 1]} ${date.year}';
   }
 
+  String _dateQuery(DateTime date) {
+    return '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+  }
+
   String _hoursLabel(double hours) {
     final minutes = (hours * 60).round();
     final wholeHours = (minutes ~/ 60).toString().padLeft(2, '0');
@@ -2243,335 +3188,534 @@ class _HomePageState extends State<HomePage> {
     return Scaffold(
       body: isLoggedIn
           ? _buildLoggedInView()
-          : Row(
+          : Stack(
               children: [
-                // Left Side - Branding
-                Expanded(
-                  flex: 1,
-                  child: Container(
-                    color: Colors.grey[200],
-                    padding: const EdgeInsets.all(48),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                Row(
+                  children: [
+                    // Left Side - Branding
+                    Expanded(
+                      flex: 1,
+                      child: Container(
+                        color: Colors.grey[200],
+                        padding: const EdgeInsets.all(48),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'HealOn',
+                              style: Theme.of(context).textTheme.displayLarge
+                                  ?.copyWith(
+                                    color: const Color(0xFF1ABE8E),
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                            ),
+                            Text(
+                              'Attendance',
+                              style: Theme.of(context).textTheme.displayLarge
+                                  ?.copyWith(
+                                    color: const Color(0xFF1ABE8E),
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                            ),
+                            const SizedBox(height: 48),
+                            Text(
+                              '"Excellence in care begins the moment you arrive. Welcome back."',
+                              style: Theme.of(context).textTheme.bodyLarge
+                                  ?.copyWith(
+                                    color: const Color(0xFF1ABE8E),
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    // Right Side - Login Form
+                    Expanded(
+                      flex: 1,
+                      child: Container(
+                        color: const Color(0xFF1ABE8E),
+                        padding: const EdgeInsets.all(48),
+                        child: LayoutBuilder(
+                          builder: (context, constraints) {
+                            return SingleChildScrollView(
+                              child: ConstrainedBox(
+                                constraints: BoxConstraints(
+                                  minHeight: constraints.maxHeight,
+                                ),
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    // Avatar
+                                    Container(
+                                      width: 100,
+                                      height: 100,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: Colors.white.withValues(
+                                          alpha: 0.3,
+                                        ),
+                                      ),
+                                      child: const Icon(
+                                        Icons.person,
+                                        size: 60,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 24),
+
+                                    // Welcome Text
+                                    Text(
+                                      'Welcome back! Please enter your details',
+                                      textAlign: TextAlign.center,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .titleMedium
+                                          ?.copyWith(
+                                            color: Colors.white,
+                                            fontStyle: FontStyle.italic,
+                                          ),
+                                    ),
+                                    const SizedBox(height: 32),
+
+                                    // Username Field
+                                    Center(
+                                      child: SizedBox(
+                                        width: 300,
+                                        height: 44,
+                                        child: TextField(
+                                          controller: _empIdCtrl,
+                                          enabled: !_isLoading,
+                                          style: const TextStyle(
+                                            color: Colors.black,
+                                          ),
+                                          decoration: InputDecoration(
+                                            hintText: 'username',
+                                            filled: true,
+                                            fillColor: Colors.white,
+                                            contentPadding:
+                                                const EdgeInsets.symmetric(
+                                                  horizontal: 16,
+                                                  vertical: 10,
+                                                ),
+                                            border: OutlineInputBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(12),
+                                              borderSide: BorderSide.none,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 16),
+
+                                    // Password Field
+                                    Center(
+                                      child: SizedBox(
+                                        width: 300,
+                                        height: 44,
+                                        child: TextField(
+                                          controller: _passCtrl,
+                                          enabled: !_isLoading,
+                                          obscureText: !_showPassword,
+                                          style: const TextStyle(
+                                            color: Colors.black,
+                                          ),
+                                          decoration: InputDecoration(
+                                            hintText: 'password',
+                                            filled: true,
+                                            fillColor: Colors.white,
+                                            contentPadding:
+                                                const EdgeInsets.symmetric(
+                                                  horizontal: 16,
+                                                  vertical: 10,
+                                                ),
+                                            suffixIcon: IconButton(
+                                              icon: Icon(
+                                                _showPassword
+                                                    ? Icons.visibility_off
+                                                    : Icons.visibility,
+                                                color: Colors.grey,
+                                              ),
+                                              onPressed: () => setState(
+                                                () => _showPassword =
+                                                    !_showPassword,
+                                              ),
+                                            ),
+                                            border: OutlineInputBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(12),
+                                              borderSide: BorderSide.none,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 12),
+
+                                    if (_passwordRefillUsername != null) ...[
+                                      Center(
+                                        child: SizedBox(
+                                          width: 300,
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 12,
+                                              vertical: 10,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: Colors.white.withValues(
+                                                alpha: 0.18,
+                                              ),
+                                              borderRadius:
+                                                  BorderRadius.circular(8),
+                                              border: Border.all(
+                                                color: Colors.white.withValues(
+                                                  alpha: 0.55,
+                                                ),
+                                              ),
+                                            ),
+                                            child: Row(
+                                              children: [
+                                                const Icon(
+                                                  Icons.lock_reset,
+                                                  color: Colors.white,
+                                                  size: 18,
+                                                ),
+                                                const SizedBox(width: 8),
+                                                const Expanded(
+                                                  child: Text(
+                                                    'Saved password found',
+                                                    style: TextStyle(
+                                                      color: Colors.white,
+                                                      fontWeight:
+                                                          FontWeight.w700,
+                                                    ),
+                                                  ),
+                                                ),
+                                                TextButton(
+                                                  onPressed: _isLoading
+                                                      ? null
+                                                      : _refillSavedPassword,
+                                                  style: TextButton.styleFrom(
+                                                    foregroundColor:
+                                                        Colors.white,
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          horizontal: 8,
+                                                        ),
+                                                  ),
+                                                  child: const Text('Refill'),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 12),
+                                    ],
+
+                                    // Forgot Password Link
+                                    Center(
+                                      child: SizedBox(
+                                        width: 300,
+                                        child: Align(
+                                          alignment: Alignment.centerRight,
+                                          child: TextButton(
+                                            onPressed:
+                                                _showForgotPasswordDialog,
+                                            style: TextButton.styleFrom(
+                                              padding: EdgeInsets.zero,
+                                            ),
+                                            child: const Text(
+                                              'Forgot Password',
+                                              style: TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 14,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 16),
+
+                                    // Remember Me Checkbox
+                                    Center(
+                                      child: SizedBox(
+                                        width: 300,
+                                        child: Row(
+                                          children: [
+                                            Checkbox(
+                                              value: _rememberMe,
+                                              onChanged: (value) => setState(
+                                                () => _rememberMe =
+                                                    value ?? false,
+                                              ),
+                                              fillColor:
+                                                  WidgetStateProperty.all(
+                                                    Colors.white,
+                                                  ),
+                                              checkColor: const Color(
+                                                0xFF1ABE8E,
+                                              ),
+                                            ),
+                                            const Expanded(
+                                              child: Text(
+                                                'Remember user details',
+                                                style: TextStyle(
+                                                  color: Colors.white,
+                                                ),
+                                                softWrap: true,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 24),
+
+                                    // Role Dropdown - Centered and Small
+                                    Center(
+                                      child: SizedBox(
+                                        width: 150,
+                                        child: DropdownButtonFormField<String>(
+                                          initialValue: _selectedRole,
+                                          onChanged: (value) => setState(
+                                            () =>
+                                                _selectedRole = value ?? 'User',
+                                          ),
+                                          items: ['User', 'Admin', 'HR']
+                                              .map(
+                                                (role) => DropdownMenuItem(
+                                                  value: role,
+                                                  child: Text(role),
+                                                ),
+                                              )
+                                              .toList(),
+                                          style: const TextStyle(
+                                            color: Colors.black,
+                                          ),
+                                          decoration: InputDecoration(
+                                            filled: true,
+                                            fillColor: Colors.white,
+                                            border: OutlineInputBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(12),
+                                              borderSide: BorderSide.none,
+                                            ),
+                                            contentPadding:
+                                                const EdgeInsets.symmetric(
+                                                  horizontal: 12,
+                                                  vertical: 8,
+                                                ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 32),
+
+                                    // Login Button - Small and Centered
+                                    Center(
+                                      child: SizedBox(
+                                        width: 150,
+                                        height: 44,
+                                        child: ElevatedButton(
+                                          onPressed: _isLoading ? null : login,
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: const Color(
+                                              0xFF0066FF,
+                                            ),
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(24),
+                                            ),
+                                          ),
+                                          child: _isLoading
+                                              ? const SizedBox(
+                                                  height: 20,
+                                                  width: 20,
+                                                  child: CircularProgressIndicator(
+                                                    strokeWidth: 2,
+                                                    valueColor:
+                                                        AlwaysStoppedAnimation<
+                                                          Color
+                                                        >(Colors.white),
+                                                  ),
+                                                )
+                                              : const Text(
+                                                  'Login',
+                                                  style: TextStyle(
+                                                    fontSize: 16,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: Colors.white,
+                                                  ),
+                                                ),
+                                        ),
+                                      ),
+                                    ),
+
+                                    // Status Message
+                                    if (_status.isNotEmpty) ...[
+                                      const SizedBox(height: 16),
+                                      Container(
+                                        padding: const EdgeInsets.all(12),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white.withValues(
+                                            alpha: 0.2,
+                                          ),
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                          border: Border.all(
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          _status,
+                                          textAlign: TextAlign.center,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                _buildLoginHelpdesk(),
+              ],
+            ),
+    );
+  }
+
+  Widget _buildLoginHelpdesk() {
+    return Positioned(
+      left: 24,
+      right: 24,
+      bottom: 20,
+      child: Align(
+        alignment: Alignment.bottomCenter,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (_showLoginHelpdesk) ...[
+              Container(
+                width: 340,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFE5E7EB)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.18),
+                      blurRadius: 18,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
                       children: [
-                        Text(
-                          'HealOn',
-                          style: Theme.of(context).textTheme.displayLarge
-                              ?.copyWith(
-                                color: const Color(0xFF1ABE8E),
-                                fontWeight: FontWeight.bold,
-                              ),
+                        const Icon(
+                          Icons.support_agent,
+                          color: Color(0xFF1ABE8E),
                         ),
-                        Text(
-                          'Attendance',
-                          style: Theme.of(context).textTheme.displayLarge
-                              ?.copyWith(
-                                color: const Color(0xFF1ABE8E),
-                                fontWeight: FontWeight.bold,
-                              ),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Text(
+                            'Help Desk',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF1F2E5A),
+                            ),
+                          ),
                         ),
-                        const SizedBox(height: 48),
-                        Text(
-                          '"Excellence in care begins the moment you arrive. Welcome back."',
-                          style: Theme.of(context).textTheme.bodyLarge
-                              ?.copyWith(
-                                color: const Color(0xFF1ABE8E),
-                                fontStyle: FontStyle.italic,
-                              ),
+                        IconButton(
+                          tooltip: 'Close',
+                          onPressed: () =>
+                              setState(() => _showLoginHelpdesk = false),
+                          icon: const Icon(Icons.close),
                         ),
                       ],
                     ),
-                  ),
-                ),
-                // Right Side - Login Form
-                Expanded(
-                  flex: 1,
-                  child: Container(
-                    color: const Color(0xFF1ABE8E),
-                    padding: const EdgeInsets.all(48),
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        return SingleChildScrollView(
-                          child: ConstrainedBox(
-                            constraints: BoxConstraints(
-                              minHeight: constraints.maxHeight,
-                            ),
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                // Avatar
-                                Container(
-                                  width: 100,
-                                  height: 100,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: Colors.white.withValues(alpha: 0.3),
-                                  ),
-                                  child: const Icon(
-                                    Icons.person,
-                                    size: 60,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                                const SizedBox(height: 24),
-
-                                // Welcome Text
-                                Text(
-                                  'Welcome back! Please enter your details',
-                                  textAlign: TextAlign.center,
-                                  style: Theme.of(context).textTheme.titleMedium
-                                      ?.copyWith(
-                                        color: Colors.white,
-                                        fontStyle: FontStyle.italic,
-                                      ),
-                                ),
-                                const SizedBox(height: 32),
-
-                                // Username Field
-                                Center(
-                                  child: SizedBox(
-                                    width: 300,
-                                    height: 44,
-                                    child: TextField(
-                                      controller: _empIdCtrl,
-                                      enabled: !_isLoading,
-                                      style: const TextStyle(
-                                        color: Colors.black,
-                                      ),
-                                      decoration: InputDecoration(
-                                        hintText: 'username',
-                                        filled: true,
-                                        fillColor: Colors.white,
-                                        contentPadding:
-                                            const EdgeInsets.symmetric(
-                                              horizontal: 16,
-                                              vertical: 10,
-                                            ),
-                                        border: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            12,
-                                          ),
-                                          borderSide: BorderSide.none,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 16),
-
-                                // Password Field
-                                Center(
-                                  child: SizedBox(
-                                    width: 300,
-                                    height: 44,
-                                    child: TextField(
-                                      controller: _passCtrl,
-                                      enabled: !_isLoading,
-                                      obscureText: !_showPassword,
-                                      style: const TextStyle(
-                                        color: Colors.black,
-                                      ),
-                                      decoration: InputDecoration(
-                                        hintText: 'password',
-                                        filled: true,
-                                        fillColor: Colors.white,
-                                        contentPadding:
-                                            const EdgeInsets.symmetric(
-                                              horizontal: 16,
-                                              vertical: 10,
-                                            ),
-                                        suffixIcon: IconButton(
-                                          icon: Icon(
-                                            _showPassword
-                                                ? Icons.visibility_off
-                                                : Icons.visibility,
-                                            color: Colors.grey,
-                                          ),
-                                          onPressed: () => setState(
-                                            () =>
-                                                _showPassword = !_showPassword,
-                                          ),
-                                        ),
-                                        border: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            12,
-                                          ),
-                                          borderSide: BorderSide.none,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-
-                                // Forgot Password Link
-                                Center(
-                                  child: SizedBox(
-                                    width: 300,
-                                    child: Align(
-                                      alignment: Alignment.centerRight,
-                                      child: TextButton(
-                                        onPressed: _showForgotPasswordDialog,
-                                        style: TextButton.styleFrom(
-                                          padding: EdgeInsets.zero,
-                                        ),
-                                        child: const Text(
-                                          'Forgot Password',
-                                          style: TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 14,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 16),
-
-                                // Remember Me Checkbox
-                                Center(
-                                  child: SizedBox(
-                                    width: 300,
-                                    child: Row(
-                                      children: [
-                                        Checkbox(
-                                          value: _rememberMe,
-                                          onChanged: (value) => setState(
-                                            () => _rememberMe = value ?? false,
-                                          ),
-                                          fillColor: WidgetStateProperty.all(
-                                            Colors.white,
-                                          ),
-                                          checkColor: const Color(0xFF1ABE8E),
-                                        ),
-                                        const Expanded(
-                                          child: Text(
-                                            'Remember user details',
-                                            style: TextStyle(
-                                              color: Colors.white,
-                                            ),
-                                            softWrap: true,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 24),
-
-                                // Role Dropdown - Centered and Small
-                                Center(
-                                  child: SizedBox(
-                                    width: 150,
-                                    child: DropdownButtonFormField<String>(
-                                      initialValue: _selectedRole,
-                                      onChanged: (value) => setState(
-                                        () => _selectedRole = value ?? 'User',
-                                      ),
-                                      items: ['User', 'Admin', 'HR']
-                                          .map(
-                                            (role) => DropdownMenuItem(
-                                              value: role,
-                                              child: Text(role),
-                                            ),
-                                          )
-                                          .toList(),
-                                      style: const TextStyle(
-                                        color: Colors.black,
-                                      ),
-                                      decoration: InputDecoration(
-                                        filled: true,
-                                        fillColor: Colors.white,
-                                        border: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            12,
-                                          ),
-                                          borderSide: BorderSide.none,
-                                        ),
-                                        contentPadding:
-                                            const EdgeInsets.symmetric(
-                                              horizontal: 12,
-                                              vertical: 8,
-                                            ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 32),
-
-                                // Login Button - Small and Centered
-                                Center(
-                                  child: SizedBox(
-                                    width: 150,
-                                    height: 44,
-                                    child: ElevatedButton(
-                                      onPressed: _isLoading ? null : login,
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: const Color(
-                                          0xFF0066FF,
-                                        ),
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            24,
-                                          ),
-                                        ),
-                                      ),
-                                      child: _isLoading
-                                          ? const SizedBox(
-                                              height: 20,
-                                              width: 20,
-                                              child: CircularProgressIndicator(
-                                                strokeWidth: 2,
-                                                valueColor:
-                                                    AlwaysStoppedAnimation<
-                                                      Color
-                                                    >(Colors.white),
-                                              ),
-                                            )
-                                          : const Text(
-                                              'Login',
-                                              style: TextStyle(
-                                                fontSize: 16,
-                                                fontWeight: FontWeight.bold,
-                                                color: Colors.white,
-                                              ),
-                                            ),
-                                    ),
-                                  ),
-                                ),
-
-                                // Status Message
-                                if (_status.isNotEmpty) ...[
-                                  const SizedBox(height: 16),
-                                  Container(
-                                    padding: const EdgeInsets.all(12),
-                                    decoration: BoxDecoration(
-                                      color: Colors.white.withValues(
-                                        alpha: 0.2,
-                                      ),
-                                      borderRadius: BorderRadius.circular(8),
-                                      border: Border.all(color: Colors.white),
-                                    ),
-                                    child: Text(
-                                      _status,
-                                      textAlign: TextAlign.center,
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ],
-                            ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _loginHelpdeskIssueCtrl,
+                      maxLines: 3,
+                      decoration: InputDecoration(
+                        hintText: 'Small issue section',
+                        filled: true,
+                        fillColor: const Color(0xFFFCFCFD),
+                        contentPadding: const EdgeInsets.all(12),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(6),
+                          borderSide: const BorderSide(
+                            color: Color(0xFFE5E7EB),
                           ),
-                        );
-                      },
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(6),
+                          borderSide: const BorderSide(
+                            color: Color(0xFF1ABE8E),
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
+                    const SizedBox(height: 12),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: ElevatedButton.icon(
+                        onPressed: _submitLoginHelpdeskIssue,
+                        icon: const Icon(Icons.send, size: 18),
+                        label: const Text('Submit'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF2B5AF0),
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
+              const SizedBox(height: 10),
+            ],
+            ElevatedButton.icon(
+              onPressed: () =>
+                  setState(() => _showLoginHelpdesk = !_showLoginHelpdesk),
+              icon: const Icon(Icons.help_outline),
+              label: const Text('Help Desk'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.white,
+                foregroundColor: const Color(0xFF1F2E5A),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 12,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(22),
+                ),
+                elevation: 4,
+              ),
             ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -2581,22 +3725,52 @@ class _HomePageState extends State<HomePage> {
         children: [
           // Sidebar
           Container(
-            width: 280,
-            color: const Color(0xFF1F2E5A),
+            width: 292,
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Color(0xFF10204A), Color(0xFF172554)],
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Color(0x26000000),
+                  blurRadius: 24,
+                  offset: Offset(8, 0),
+                ),
+              ],
+            ),
             child: Column(
               children: [
                 // Header
                 Container(
-                  padding: const EdgeInsets.all(20),
-                  color: const Color(0xFF1F2E5A),
-                  child: Column(
+                  width: double.infinity,
+                  margin: const EdgeInsets.fromLTRB(16, 18, 16, 10),
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.12),
+                    ),
+                  ),
+                  child: Row(
                     children: [
                       Container(
-                        width: 80,
-                        height: 80,
+                        width: 54,
+                        height: 54,
                         decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: const Color(0xFF1ABE8E),
+                          borderRadius: BorderRadius.circular(16),
+                          gradient: const LinearGradient(
+                            colors: [_brandTeal, Color(0xFF34D399)],
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: _brandTeal.withValues(alpha: 0.28),
+                              blurRadius: 18,
+                              offset: const Offset(0, 8),
+                            ),
+                          ],
                         ),
                         child: Icon(
                           _isAdminRole
@@ -2604,27 +3778,43 @@ class _HomePageState extends State<HomePage> {
                               : _isHrRole
                               ? Icons.badge
                               : Icons.person,
-                          size: 50,
+                          size: 30,
                           color: Colors.white,
                         ),
                       ),
-                      const SizedBox(height: 12),
-                      Text(
-                        _isAdminRole
-                            ? 'Admin Panel'
-                            : _isHrRole
-                            ? 'HR Panel'
-                            : 'Employee Panel',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'HealOn',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 20,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              _isAdminRole
+                                  ? 'Admin Panel'
+                                  : _isHrRole
+                                  ? 'HR Panel'
+                                  : 'Employee Panel',
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.76),
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 8),
 
                 // Menu Items
                 Expanded(
@@ -2695,20 +3885,6 @@ class _HomePageState extends State<HomePage> {
                           // TASKS
                           _buildMenuItem('Tasks', Icons.task, 'Tasks'),
 
-                          if (_selectedMenu == 'Tasks') ...[
-                            _buildSubMenuItem(
-                              'Pending Tasks',
-                              _selectedTaskSection == 'Pending Tasks',
-                              () => _selectTaskSection('Pending Tasks'),
-                            ),
-
-                            _buildSubMenuItem(
-                              'Completed Tasks',
-                              _selectedTaskSection == 'Completed Tasks',
-                              () => _selectTaskSection('Completed Tasks'),
-                            ),
-                          ],
-
                           // SALARY
                           _buildMenuItem('Salary', Icons.payment, 'Salary'),
 
@@ -2739,15 +3915,14 @@ class _HomePageState extends State<HomePage> {
                               _selectedSalarySection == 'Tax Details',
                               () => _selectSalarySection('Tax Details'),
                             ),
+                            _buildSubMenuItem(
+                              'Reimbursement',
+                              _selectedSalarySection == 'Reimbursement',
+                              () => _selectSalarySection('Reimbursement'),
+                            ),
                           ],
 
                           _buildMenuItem('Helpdesk', Icons.help, 'Helpdesk'),
-
-                          _buildMenuItem(
-                            'Reports',
-                            Icons.assessment,
-                            'Reports',
-                          ),
                         ],
 
                         // ================= HR PANEL =================
@@ -2759,153 +3934,117 @@ class _HomePageState extends State<HomePage> {
                           ),
                           if (_selectedMenu == 'Employee Management') ...[
                             _buildSubMenuItem(
-                              'Staff Directory',
-                              _selectedHrSection == 'Staff Directory',
-                              () => _selectHrSection(
-                                'Employee Management',
-                                'Staff Directory',
-                              ),
+                              'Add Employee',
+                              _selectedAttendanceSection == 'Add Employee',
+                              () {
+                                setState(() {
+                                  _selectedMenu = 'Employee Management';
+                                  _selectedAttendanceSection = 'Add Employee';
+                                  _selectedHrSection = 'Add Employee';
+                                });
+                              },
                             ),
                             _buildSubMenuItem(
-                              'Smart Onboarding',
-                              _selectedHrSection == 'Smart Onboarding',
-                              () => _selectHrSection(
-                                'Employee Management',
-                                'Smart Onboarding',
-                              ),
-                            ),
-                            _buildSubMenuItem(
-                              'Employee Profile',
-                              _selectedHrSection == 'Employee Profile',
-                              () => _selectHrSection(
-                                'Employee Management',
-                                'Employee Profile',
-                              ),
+                              'Edit Employee',
+                              _selectedAttendanceSection == 'Edit Employee',
+                              () {
+                                setState(() {
+                                  _selectedMenu = 'Employee Management';
+                                  _selectedAttendanceSection = 'Edit Employee';
+                                  _selectedHrSection = 'Edit Employee';
+                                });
+                              },
                             ),
                           ],
                           _buildMenuItem(
-                            'Attendance Management',
+                            'Attendance',
                             Icons.access_time,
-                            'Attendance Management',
+                            'Attendance',
                           ),
-                          if (_selectedMenu == 'Attendance Management') ...[
+                          if (_selectedMenu == 'Attendance') ...[
                             _buildSubMenuItem(
                               'Daily Attendance',
-                              _selectedHrSection == 'Daily Attendance',
-                              () => _selectHrSection(
-                                'Attendance Management',
-                                'Daily Attendance',
-                              ),
-                            ),
-                            _buildSubMenuItem(
-                              'Attendance Insights',
-                              _selectedHrSection == 'Attendance Insights',
-                              () => _selectHrSection(
-                                'Attendance Management',
-                                'Attendance Insights',
-                              ),
+                              _selectedAttendanceSection == 'Daily Attendance',
+                              () {
+                                setState(() {
+                                  _selectedMenu = 'Attendance';
+                                  _selectedAttendanceSection =
+                                      'Daily Attendance';
+                                  _selectedHrSection = 'Daily Attendance';
+                                });
+                              },
                             ),
                             _buildSubMenuItem(
                               'Attendance Reports',
-                              _selectedHrSection == 'Attendance Reports',
-                              () => _selectHrSection(
-                                'Attendance Management',
-                                'Attendance Reports',
-                              ),
+                              _selectedAttendanceSection ==
+                                  'Attendance Reports',
+                              () {
+                                setState(() {
+                                  _selectedMenu = 'Attendance';
+                                  _selectedAttendanceSection =
+                                      'Attendance Reports';
+                                  _selectedHrSection = 'Attendance Reports';
+                                });
+                                _loadAdminAttendanceReport();
+                              },
                             ),
                           ],
                           _buildMenuItem(
-                            'Recruitment',
-                            Icons.how_to_reg,
-                            'Recruitment',
+                            'Employee Location',
+                            Icons.location_on,
+                            'Employee Location',
                           ),
-                          if (_selectedMenu == 'Recruitment') ...[
+                          if (_selectedMenu == 'Employee Location') ...[
                             _buildSubMenuItem(
-                              'Job Openings',
-                              _selectedHrSection == 'Job Openings',
-                              () => _selectHrSection(
-                                'Recruitment',
-                                'Job Openings',
-                              ),
+                              'Add Location',
+                              _selectedAttendanceSection == 'Add Location',
+                              () {
+                                setState(() {
+                                  _selectedMenu = 'Employee Location';
+                                  _selectedAttendanceSection = 'Add Location';
+                                  _selectedHrSection = 'Add Location';
+                                });
+                              },
                             ),
                             _buildSubMenuItem(
-                              'Candidate Management',
-                              _selectedHrSection == 'Candidate Management',
-                              () => _selectHrSection(
-                                'Recruitment',
-                                'Candidate Management',
-                              ),
-                            ),
-                            _buildSubMenuItem(
-                              'Interview',
-                              _selectedHrSection == 'Interview',
-                              () =>
-                                  _selectHrSection('Recruitment', 'Interview'),
+                              'Edit Location',
+                              _selectedAttendanceSection == 'Edit Location',
+                              () {
+                                setState(() {
+                                  _selectedMenu = 'Employee Location';
+                                  _selectedAttendanceSection = 'Edit Location';
+                                  _selectedHrSection = 'Edit Location';
+                                });
+                              },
                             ),
                           ],
                           _buildMenuItem(
-                            'Payroll',
+                            'Employee Payroll',
                             Icons.account_balance_wallet,
-                            'Payroll',
+                            'Employee Payroll',
                           ),
-                          if (_selectedMenu == 'Payroll') ...[
+                          if (_selectedMenu == 'Employee Payroll') ...[
                             _buildSubMenuItem(
-                              'Salary Management',
-                              _selectedHrSection == 'Salary Management',
-                              () => _selectHrSection(
-                                'Payroll',
-                                'Salary Management',
-                              ),
+                              'Reimbursement',
+                              _selectedHrPayrollSection == 'Reimbursement',
+                              () => _selectHrPayrollSection('Reimbursement'),
                             ),
                             _buildSubMenuItem(
-                              'Payslips',
-                              _selectedHrSection == 'Payslips',
-                              () => _selectHrSection('Payroll', 'Payslips'),
+                              'Salary Structure',
+                              _selectedHrPayrollSection == 'Salary Structure',
+                              () => _selectHrPayrollSection('Salary Structure'),
                             ),
                             _buildSubMenuItem(
-                              'Payroll Reports',
-                              _selectedHrSection == 'Payroll Reports',
-                              () => _selectHrSection(
-                                'Payroll',
-                                'Payroll Reports',
-                              ),
+                              'Bonus & Incentives',
+                              _selectedHrPayrollSection == 'Bonus & Incentives',
+                              () =>
+                                  _selectHrPayrollSection('Bonus & Incentives'),
                             ),
                           ],
                           _buildMenuItem(
-                            'Performance',
-                            Icons.insights,
-                            'Performance',
-                          ),
-                          if (_selectedMenu == 'Performance') ...[
-                            _buildSubMenuItem(
-                              'Performance Tracker',
-                              _selectedHrSection == 'Performance Tracker',
-                              () => _selectHrSection(
-                                'Performance',
-                                'Performance Tracker',
-                              ),
-                            ),
-                            _buildSubMenuItem(
-                              'Evaluations',
-                              _selectedHrSection == 'Evaluations',
-                              () => _selectHrSection(
-                                'Performance',
-                                'Evaluations',
-                              ),
-                            ),
-                            _buildSubMenuItem(
-                              'Rewards and Recognition',
-                              _selectedHrSection == 'Rewards and Recognition',
-                              () => _selectHrSection(
-                                'Performance',
-                                'Rewards and Recognition',
-                              ),
-                            ),
-                          ],
-                          _buildMenuItem(
-                            'Help Desk',
-                            Icons.support_agent,
-                            'Help Desk',
+                            'Leaves',
+                            Icons.calendar_today,
+                            'Leaves',
                           ),
                         ],
 
@@ -3033,9 +4172,21 @@ class _HomePageState extends State<HomePage> {
                         _status = '';
                       }),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.red,
+                        backgroundColor: const Color(0xFFEF4444),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
                       ),
-                      child: const Text('Logout'),
+                      child: const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.logout, size: 18),
+                          SizedBox(width: 8),
+                          Text('Logout'),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -3044,304 +4195,399 @@ class _HomePageState extends State<HomePage> {
           ),
           // Main Content
           Expanded(
-            child: _isAdminRole
-                ? _selectedMenu == 'Attendance'
-                      ? _buildAdminAttendanceView()
-                      : _selectedMenu == 'Employee Management'
-                      ? _selectedAttendanceSection == 'Add Employee'
-                            ? _buildEmployeeRegistrationView()
-                            : _buildAdminEmployeesView()
-                      : _selectedMenu == 'Smart Location Management'
-                      ? _buildSmartLocationManagementView()
-                      : _selectedMenu == 'Work Monitoring'
-                      ? _buildWorkMonitoringDashboard()
-                      : _selectedMenu == 'Pending Requests'
-                      ? _buildPendingRequestsDashboard()
-                      : _selectedMenu == 'Helpdesk'
-                      ? _buildHelpdeskView()
-                      : _buildAdminDashboard()
-                : _isHrRole
-                ? _selectedMenu == 'Help Desk'
-                      ? _buildHelpdeskView()
-                      : _selectedMenu == 'Dashboard'
-                      ? _buildHrDashboardView()
-                      : _buildHrSectionView()
-                : _selectedMenu == 'Attendance'
-                ? _buildAttendanceReportView()
-                : _selectedMenu == 'Tasks'
-                ? _buildTasksView()
-                : _selectedMenu == 'Leaves'
-                ? _buildLeavesView()
-                : _selectedMenu == 'Salary'
-                ? _buildSalaryView()
-                : _selectedMenu == 'Helpdesk'
-                ? _buildHelpdeskView()
-                : _selectedMenu == 'Reports'
-                ? _buildEmployeeReportsView()
-                : SingleChildScrollView(
-                    padding: const EdgeInsets.all(32),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Welcome Section
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+            child: Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [Color(0xFFF8FAFC), Color(0xFFEFF6FF)],
+                ),
+              ),
+              child: DataTableTheme(
+                data: DataTableThemeData(
+                  headingRowColor: WidgetStateProperty.all(
+                    const Color(0xFFF1F5F9),
+                  ),
+                  headingTextStyle: const TextStyle(
+                    color: _inkBlue,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0,
+                  ),
+                  dataTextStyle: const TextStyle(
+                    color: Color(0xFF334155),
+                    fontSize: 13,
+                  ),
+                  dividerThickness: 0.6,
+                ),
+                child: _isAdminRole
+                    ? _selectedMenu == 'Attendance'
+                          ? _buildAdminAttendanceView()
+                          : _selectedMenu == 'Employee Management'
+                          ? _selectedAttendanceSection == 'Add Employee'
+                                ? _buildEmployeeRegistrationView()
+                                : _buildAdminEmployeesView()
+                          : _selectedMenu == 'Smart Location Management'
+                          ? _buildSmartLocationManagementView()
+                          : _selectedMenu == 'Work Monitoring'
+                          ? _buildWorkMonitoringDashboard()
+                          : _selectedMenu == 'Total Employees'
+                          ? _buildTotalEmployeesDashboard()
+                          : _selectedMenu == 'Pending Requests'
+                          ? _buildPendingRequestsDashboard()
+                          : _selectedMenu == 'Helpdesk'
+                          ? _buildHelpdeskView()
+                          : _buildAdminDashboard()
+                    : _isHrRole
+                    ? _selectedMenu == 'Employee Management'
+                          ? _selectedAttendanceSection == 'Add Employee'
+                                ? _buildEmployeeRegistrationView()
+                                : _buildAdminEmployeesView()
+                          : _selectedMenu == 'Attendance'
+                          ? _buildAdminAttendanceView()
+                          : _selectedMenu == 'Employee Location'
+                          ? _buildSmartLocationManagementView()
+                          : _selectedMenu == 'Employee Payroll'
+                          ? _buildAdminReimbursementsView()
+                          : _selectedMenu == 'Leaves'
+                          ? _buildHrLeavesView()
+                          : _selectedMenu == 'Dashboard'
+                          ? _buildHrDashboardView()
+                          : _buildHrSectionView()
+                    : _selectedMenu == 'Attendance'
+                    ? _buildAttendanceReportView()
+                    : _selectedMenu == 'Tasks'
+                    ? _buildTasksView()
+                    : _selectedMenu == 'Leaves'
+                    ? _buildLeavesView()
+                    : _selectedMenu == 'Salary'
+                    ? _buildSalaryView()
+                    : _selectedMenu == 'Helpdesk'
+                    ? _buildHelpdeskView()
+                    : Container(
+                        decoration: const BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              Color(0xFFFFF7FB),
+                              Color(0xFFF8FCFF),
+                              Color(0xFFCFF8F0),
+                              Color(0xFFEFF9FF),
+                              Color(0xFFFFFBFD),
+                            ],
+                            stops: [0.0, 0.24, 0.54, 0.78, 1.0],
+                          ),
+                        ),
+                        child: SingleChildScrollView(
+                          padding: const EdgeInsets.all(32),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Welcome Section
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
                                 children: [
-                                  Text(
-                                    'Welcome Back 👋',
-                                    style: Theme.of(context).textTheme.bodyLarge
-                                        ?.copyWith(color: Colors.grey[600]),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    'User Dashboard - ${_currentUser?['name'] ?? 'Employee'}',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .displaySmall
-                                        ?.copyWith(
-                                          color: const Color(0xFF1F2E5A),
-                                          fontWeight: FontWeight.bold,
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'Welcome Back 👋',
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodyLarge
+                                              ?.copyWith(
+                                                color: Colors.grey[600],
+                                              ),
                                         ),
+                                        const SizedBox(height: 8),
+                                        Text(
+                                          'User Dashboard - ${_currentUser?['name'] ?? 'Employee'}',
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .displaySmall
+                                              ?.copyWith(
+                                                color: const Color(0xFF1F2E5A),
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        Text(
+                                          'Track your attendance, working hours and leave requests easily.',
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodyMedium
+                                              ?.copyWith(
+                                                color: Colors.grey[600],
+                                              ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    'Track your attendance, working hours and leave requests easily.',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodyMedium
-                                        ?.copyWith(color: Colors.grey[600]),
+                                  IconButton.filled(
+                                    tooltip: 'Refresh dashboard',
+                                    onPressed: _isDashboardLoading
+                                        ? null
+                                        : refreshDashboardData,
+                                    style: IconButton.styleFrom(
+                                      backgroundColor: const Color(0xFF2B5AF0),
+                                      foregroundColor: Colors.white,
+                                      disabledBackgroundColor: Colors.grey[300],
+                                    ),
+                                    icon: _isDashboardLoading
+                                        ? const SizedBox(
+                                            width: 18,
+                                            height: 18,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              color: Colors.white,
+                                            ),
+                                          )
+                                        : const Icon(Icons.refresh),
                                   ),
                                 ],
                               ),
-                            ),
-                            IconButton.filled(
-                              tooltip: 'Refresh dashboard',
-                              onPressed: _isDashboardLoading
-                                  ? null
-                                  : refreshDashboardData,
-                              style: IconButton.styleFrom(
-                                backgroundColor: const Color(0xFF2B5AF0),
-                                foregroundColor: Colors.white,
-                                disabledBackgroundColor: Colors.grey[300],
+                              const SizedBox(height: 20),
+                              _buildWelcomeQuoteBanner(
+                                _currentDisplayName('Employee'),
+                                'User',
                               ),
-                              icon: _isDashboardLoading
-                                  ? const SizedBox(
-                                      width: 18,
-                                      height: 18,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        color: Colors.white,
-                                      ),
-                                    )
-                                  : const Icon(Icons.refresh),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 32),
-                        if (_isDashboardLoading)
-                          const LinearProgressIndicator()
-                        else if (_dashboardError != null)
-                          _buildReportMessage(
-                            icon: Icons.error_outline,
-                            title: 'Dashboard not connected',
-                            message: _dashboardError!,
-                            actionLabel: 'Retry',
-                            onAction: loadDashboardData,
-                          ),
-                        if (_isDashboardLoading || _dashboardError != null)
-                          const SizedBox(height: 24),
+                              const SizedBox(height: 32),
+                              if (_isDashboardLoading)
+                                const LinearProgressIndicator()
+                              else if (_dashboardError != null)
+                                _buildReportMessage(
+                                  icon: Icons.error_outline,
+                                  title: 'Dashboard not connected',
+                                  message: _dashboardError!,
+                                  actionLabel: 'Retry',
+                                  onAction: loadDashboardData,
+                                ),
+                              if (_isDashboardLoading ||
+                                  _dashboardError != null)
+                                const SizedBox(height: 24),
 
-                        // Check In/Out Buttons
-                        Row(
-                          children: [
-                            ElevatedButton(
-                              onPressed: checkIn,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFF1ABE8E),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 32,
-                                  vertical: 16,
-                                ),
-                              ),
-                              child: const Text(
-                                'Check In',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 16),
-                            ElevatedButton(
-                              onPressed: checkOut,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.red,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 32,
-                                  vertical: 16,
-                                ),
-                              ),
-                              child: const Text(
-                                'Check Out',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 48),
-                        Wrap(
-                          spacing: 16,
-                          runSpacing: 16,
-                          children: [
-                            SizedBox(
-                              width: 260,
-                              child: _buildSummaryTile(
-                                'Present Days',
-                                _readInt(
-                                  _userSection('attendance'),
-                                  'present_days_this_month',
-                                ).toString(),
-                                Icons.event_available,
-                                const Color(0xFF1ABE8E),
-                                isCompact: true,
-                              ),
-                            ),
-                            SizedBox(
-                              width: 260,
-                              child: _buildSummaryTile(
-                                'Leave Balance',
-                                _readInt(
-                                  _userSection('leaves'),
-                                  'available',
-                                ).toString(),
-                                Icons.event_note,
-                                Colors.orange,
-                                isCompact: true,
-                              ),
-                            ),
-                            SizedBox(
-                              width: 260,
-                              child: _buildSummaryTile(
-                                'Leave Applied',
-                                _readInt(
-                                  _userSection('leaves'),
-                                  'applied',
-                                ).toString(),
-                                Icons.pending_actions,
-                                Colors.orange,
-                                isCompact: true,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 24),
-
-                        // Main Content Row
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            // Left - Upcoming Holidays
-                            Expanded(
-                              flex: 2,
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                              // Check In/Out Buttons
+                              Row(
                                 children: [
-                                  Row(
-                                    children: [
-                                      const Icon(
-                                        Icons.calendar_month,
-                                        size: 24,
-                                        color: Colors.red,
+                                  ElevatedButton(
+                                    onPressed: checkIn,
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: const Color(0xFF1ABE8E),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 32,
+                                        vertical: 16,
                                       ),
-                                      const SizedBox(width: 8),
-                                      Text(
-                                        'Upcoming Holidays',
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .titleLarge
-                                            ?.copyWith(
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                      ),
-                                    ],
+                                    ),
+                                    child: const Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.camera_alt,
+                                          color: Colors.white,
+                                        ),
+                                        SizedBox(width: 8),
+                                        Text(
+                                          'Check In',
+                                          style: TextStyle(
+                                            fontSize: 16,
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
-                                  const SizedBox(height: 16),
-                                  ..._dashboardHolidayRows().map(
-                                    (holiday) => _buildHolidayCard(
-                                      holiday['name']!,
-                                      holiday['date']!,
+                                  const SizedBox(width: 16),
+                                  ElevatedButton(
+                                    onPressed: checkOut,
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.red,
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 32,
+                                        vertical: 16,
+                                      ),
+                                    ),
+                                    child: const Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.camera_alt,
+                                          color: Colors.white,
+                                        ),
+                                        SizedBox(width: 8),
+                                        Text(
+                                          'Check Out',
+                                          style: TextStyle(
+                                            fontSize: 16,
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
                                 ],
                               ),
-                            ),
-                            const SizedBox(width: 32),
-                            // Right - Cards
-                            Expanded(
-                              flex: 1,
-                              child: Column(
+                              if (_lastAttendancePhotoBiometric != null) ...[
+                                const SizedBox(height: 18),
+                                _buildPhotoBiometricPreview(
+                                  'Latest captured biometric',
+                                  _lastAttendancePhotoBiometric!,
+                                  message: _lastAttendanceBiometricMessage,
+                                ),
+                              ],
+                              const SizedBox(height: 48),
+                              Wrap(
+                                spacing: 16,
+                                runSpacing: 16,
                                 children: [
-                                  _buildDashboardCard(
-                                    'Work Assigned',
-                                    '${_readInt(_userSection('tasks'), 'assigned')} Pending Tasks',
-                                    Icons.work_outline,
-                                    const Color(0xFF2B5AF0),
+                                  SizedBox(
+                                    width: 260,
+                                    child: _buildSummaryTile(
+                                      'Present Days',
+                                      _readInt(
+                                        _userSection('attendance'),
+                                        'present_days_this_month',
+                                      ).toString(),
+                                      Icons.event_available,
+                                      const Color(0xFF1ABE8E),
+                                      isCompact: true,
+                                    ),
                                   ),
-                                  const SizedBox(height: 24),
-                                  _buildDashboardCard(
-                                    'Review Tasks',
-                                    '${_readInt(_userSection('tasks'), 'review_pending')} Reviews Pending',
-                                    Icons.assignment_turned_in,
-                                    Colors.orange,
+                                  SizedBox(
+                                    width: 260,
+                                    child: _buildSummaryTile(
+                                      'Leave Balance',
+                                      _readInt(
+                                        _userSection('leaves'),
+                                        'available',
+                                      ).toString(),
+                                      Icons.event_note,
+                                      Colors.orange,
+                                      isCompact: true,
+                                    ),
+                                  ),
+                                  SizedBox(
+                                    width: 260,
+                                    child: _buildSummaryTile(
+                                      'Leave Applied',
+                                      _readInt(
+                                        _userSection('leaves'),
+                                        'applied',
+                                      ).toString(),
+                                      Icons.pending_actions,
+                                      Colors.orange,
+                                      isCompact: true,
+                                    ),
                                   ),
                                 ],
                               ),
-                            ),
-                          ],
-                        ),
+                              const SizedBox(height: 24),
 
-                        // Status Message
-                        if (_status.isNotEmpty) ...[
-                          const SizedBox(height: 32),
-                          Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color:
-                                  _status.contains('Check-in') ||
-                                      _status.contains('Check-out')
-                                  ? Colors.green[50]
-                                  : Colors.red[50],
-                              border: Border.all(
-                                color:
-                                    _status.contains('Check-in') ||
-                                        _status.contains('Check-out')
-                                    ? Colors.green[300]!
-                                    : Colors.red[300]!,
+                              // Main Content Row
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  // Left - Upcoming Holidays
+                                  Expanded(
+                                    flex: 2,
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            const Icon(
+                                              Icons.calendar_month,
+                                              size: 24,
+                                              color: Colors.red,
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Text(
+                                              'Upcoming Holidays',
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .titleLarge
+                                                  ?.copyWith(
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 16),
+                                        ..._dashboardHolidayRows().map(
+                                          (holiday) => _buildHolidayCard(
+                                            holiday['name']!,
+                                            holiday['date']!,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 32),
+                                  // Right - Cards
+                                  Expanded(
+                                    flex: 1,
+                                    child: Column(
+                                      children: [
+                                        _buildDashboardCard(
+                                          'Work Assigned',
+                                          '${_readInt(_userSection('tasks'), 'assigned')} Pending Tasks',
+                                          Icons.work_outline,
+                                          const Color(0xFF2B5AF0),
+                                        ),
+                                        const SizedBox(height: 24),
+                                        _buildDashboardCard(
+                                          'Review Tasks',
+                                          '${_readInt(_userSection('tasks'), 'review_pending')} Reviews Pending',
+                                          Icons.assignment_turned_in,
+                                          Colors.orange,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
                               ),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              _status,
-                              style: TextStyle(
-                                color:
-                                    _status.contains('Check-in') ||
-                                        _status.contains('Check-out')
-                                    ? Colors.green[700]
-                                    : Colors.red[700],
-                              ),
-                            ),
+
+                              // Status Message
+                              if (_status.isNotEmpty) ...[
+                                const SizedBox(height: 32),
+                                Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color:
+                                        _status.contains('Check-in') ||
+                                            _status.contains('Check-out')
+                                        ? Colors.green[50]
+                                        : Colors.red[50],
+                                    border: Border.all(
+                                      color:
+                                          _status.contains('Check-in') ||
+                                              _status.contains('Check-out')
+                                          ? Colors.green[300]!
+                                          : Colors.red[300]!,
+                                    ),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(
+                                    _status,
+                                    style: TextStyle(
+                                      color:
+                                          _status.contains('Check-in') ||
+                                              _status.contains('Check-out')
+                                          ? Colors.green[700]
+                                          : Colors.red[700],
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
                           ),
-                        ],
-                      ],
-                    ),
-                  ),
+                        ),
+                      ),
+              ),
+            ),
           ),
         ],
       ),
@@ -3678,10 +4924,13 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildRegularizationToolbar() {
-    return _buildReportMonthYearControls(maxWidth: 520);
+    return _buildReportMonthYearControls(maxWidth: 520, showViewButton: false);
   }
 
-  Widget _buildReportMonthYearControls({double maxWidth = 560}) {
+  Widget _buildReportMonthYearControls({
+    double maxWidth = 560,
+    bool showViewButton = true,
+  }) {
     final currentYear = DateTime.now().year;
     final years = List.generate(
       6,
@@ -3729,28 +4978,30 @@ class _HomePageState extends State<HomePage> {
                       },
               ),
             ),
-            const SizedBox(width: 12),
-            ElevatedButton(
-              onPressed: _isReportLoading ? null : loadAttendanceReport,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF2B5AF0),
-                foregroundColor: Colors.white,
-                minimumSize: const Size(86, 44),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(6),
+            if (showViewButton) ...[
+              const SizedBox(width: 12),
+              ElevatedButton(
+                onPressed: _isReportLoading ? null : loadAttendanceReport,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF2B5AF0),
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size(86, 44),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(6),
+                  ),
                 ),
+                child: _isReportLoading
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Text('View'),
               ),
-              child: _isReportLoading
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : const Text('View'),
-            ),
+            ],
           ],
         ),
       ),
@@ -3971,19 +5222,42 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
           const SizedBox(height: 6),
-          TextField(
-            controller: _regularizationCcCtrl,
-            readOnly: true,
-            minLines: 1,
-            maxLines: 3,
+          InkWell(
             onTap: _showRegularizationCcPicker,
-            decoration: _regularizationInputDecoration(
-              hintText: 'Select employee',
-              prefixIcon: const Icon(Icons.person_outline, size: 20),
-              suffixIcon: IconButton(
-                tooltip: 'Select employee',
-                onPressed: _showRegularizationCcPicker,
-                icon: const Icon(Icons.arrow_drop_down, size: 22),
+            borderRadius: BorderRadius.circular(4),
+            child: Container(
+              height: 48,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                border: Border.all(color: const Color(0xFF3F63FF), width: 1.4),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Row(
+                children: [
+                  const SizedBox(width: 12),
+                  const Icon(
+                    Icons.add_circle_outline,
+                    color: Color(0xFF334155),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Text(
+                      _regularizationCcCtrl.text.isEmpty
+                          ? 'Add contact details'
+                          : _regularizationCcCtrl.text,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: _regularizationCcCtrl.text.isEmpty
+                            ? const Color(0xFF4B5563)
+                            : const Color(0xFF1F2E5A),
+                        fontSize: 16,
+                        fontWeight: _regularizationCcCtrl.text.isEmpty
+                            ? FontWeight.w400
+                            : FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -4013,13 +5287,37 @@ class _HomePageState extends State<HomePage> {
         const SizedBox(height: 6),
         TextField(
           controller: controller,
+          readOnly: true,
+          onTap: () => _pickRegularizationTime(controller),
           decoration: _regularizationInputDecoration(
             hintText: hintText,
-            suffixIcon: const Icon(Icons.access_time, size: 17),
+            suffixIcon: IconButton(
+              tooltip: 'Set time',
+              onPressed: () => _pickRegularizationTime(controller),
+              icon: const Icon(Icons.access_time, size: 17),
+            ),
           ),
         ),
       ],
     );
+  }
+
+  Future<void> _pickRegularizationTime(TextEditingController controller) async {
+    final parts = controller.text.split(':');
+    final initialHour = parts.isNotEmpty ? int.tryParse(parts[0]) ?? 10 : 10;
+    final initialMinute = parts.length > 1 ? int.tryParse(parts[1]) ?? 0 : 0;
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(
+        hour: initialHour.clamp(0, 23).toInt(),
+        minute: initialMinute.clamp(0, 59).toInt(),
+      ),
+    );
+    if (picked == null) return;
+    setState(() {
+      controller.text =
+          '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}';
+    });
   }
 
   InputDecoration _regularizationInputDecoration({
@@ -4920,6 +6218,7 @@ class _HomePageState extends State<HomePage> {
           ),
           const SizedBox(height: 10),
           TextField(
+            controller: _taskReasonCtrl,
             maxLines: 3,
             decoration: InputDecoration(
               hintText:
@@ -4945,7 +6244,7 @@ class _HomePageState extends State<HomePage> {
           Align(
             alignment: Alignment.centerRight,
             child: ElevatedButton(
-              onPressed: () {},
+              onPressed: _isTaskSubmitting ? null : _submitTaskReason,
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF2B5AF0),
                 foregroundColor: Colors.white,
@@ -4954,7 +6253,16 @@ class _HomePageState extends State<HomePage> {
                   borderRadius: BorderRadius.circular(6),
                 ),
               ),
-              child: const Text('Submit'),
+              child: _isTaskSubmitting
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Text('Submit'),
             ),
           ),
         ],
@@ -5127,7 +6435,7 @@ class _HomePageState extends State<HomePage> {
             final color = leaveType['color'] as Color;
             final used = leaveType['used'] as int;
             final total = leaveType['total'] as int;
-            final displayUsed = used == 0 ? 1 : used.clamp(0, total);
+            final displayUsed = used.clamp(0, total);
             final available = (total - displayUsed).clamp(0, total);
             final isSelected = name == selectedLeaveType;
 
@@ -5151,27 +6459,31 @@ class _HomePageState extends State<HomePage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Container(
-                      width: 42,
-                      height: 42,
-                      decoration: BoxDecoration(
-                        color: color.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Icon(
-                        leaveType['icon'] as IconData,
-                        color: color,
-                        size: 24,
-                      ),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          width: 42,
+                          height: 42,
+                          decoration: BoxDecoration(
+                            color: color.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Icon(
+                            leaveType['icon'] as IconData,
+                            color: color,
+                            size: 24,
+                          ),
+                        ),
+                        const Spacer(),
+                        Text(
+                          '$available available',
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: Colors.grey[600]),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 12),
-                    Text(
-                      '$available available',
-                      style: Theme.of(
-                        context,
-                      ).textTheme.bodySmall?.copyWith(color: Colors.grey[600]),
-                    ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 16),
                     Text(
                       name,
                       maxLines: 2,
@@ -6088,7 +7400,6 @@ class _HomePageState extends State<HomePage> {
   Map<String, List<Map<String, dynamic>>> _leaveCalendarEntries() {
     final grouped = <String, List<Map<String, dynamic>>>{};
     for (final leave in _leaveRequests()) {
-      if (leave['status']?.toString().toLowerCase() != 'approved') continue;
       final fromDate = DateTime.tryParse(leave['from_date']?.toString() ?? '');
       final toDate = DateTime.tryParse(leave['to_date']?.toString() ?? '');
       if (fromDate == null || toDate == null) continue;
@@ -6523,6 +7834,8 @@ class _HomePageState extends State<HomePage> {
       description = 'Review bonus payments, incentives, and payout history.';
     } else if (section == 'Tax Details') {
       description = 'Review tax declarations, deductions, and annual tax data.';
+    } else if (section == 'Reimbursement') {
+      description = 'Submit reimbursement PDFs and review requests by date.';
     }
 
     return SingleChildScrollView(
@@ -6538,6 +7851,8 @@ class _HomePageState extends State<HomePage> {
             _buildCompensationBenefitsSection()
           else if (section == 'Bonus & Incentives')
             _buildBonusIncentivesSection()
+          else if (section == 'Reimbursement')
+            _buildReimbursementSection()
           else
             _buildTaxDetailsSection(),
         ],
@@ -6860,6 +8175,563 @@ class _HomePageState extends State<HomePage> {
           isHighlighted: true,
         ),
       ],
+    );
+  }
+
+  Widget _buildReimbursementSection() {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 760),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey[200]!),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Reimbursement',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: const Color(0xFF1F2E5A),
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: _isReimbursementLoading
+                            ? null
+                            : () => _pickReimbursementDate(),
+                        icon: const Icon(Icons.calendar_today),
+                        label: Text(
+                          _readableDate(
+                            _selectedReimbursementDate.toIso8601String(),
+                          ),
+                        ),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: _isReimbursementLoading
+                            ? null
+                            : _pickReimbursementPdf,
+                        icon: const Icon(Icons.picture_as_pdf),
+                        label: Text(
+                          _reimbursementFileName == null
+                              ? 'Upload PDF'
+                              : _reimbursementFileName!,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    width: 460,
+                    child: TextField(
+                      controller: _reimbursementReasonCtrl,
+                      maxLines: 3,
+                      decoration: _salaryInputDecoration(label: 'Reason'),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  ElevatedButton.icon(
+                    onPressed: _isReimbursementLoading
+                        ? null
+                        : _submitReimbursement,
+                    icon: _isReimbursementLoading
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.upload_file),
+                    label: const Text('Upload'),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 22),
+            _buildReimbursementTable(
+              rows: _reimbursements,
+              isLoading: _isReimbursementLoading,
+              showEmployee: false,
+              emptyMessage: 'No reimbursements submitted for this date.',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAdminReimbursementsView() {
+    final section = _selectedHrPayrollSection;
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(32),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSectionHeader(
+            'Employee Payroll',
+            section == 'Reimbursement'
+                ? 'Review employee reimbursement submissions by date.'
+                : section == 'Salary Structure'
+                ? 'Create monthly salary structures and publish payslips.'
+                : 'Add bonus and incentives for an employee pay period.',
+          ),
+          const SizedBox(height: 24),
+          _buildHrPayrollTabs(),
+          const SizedBox(height: 22),
+          if (section == 'Reimbursement')
+            _buildHrReimbursementPanel()
+          else if (section == 'Salary Structure')
+            _buildHrSalaryStructurePanel()
+          else
+            _buildHrBonusIncentivesPanel(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHrPayrollTabs() {
+    return Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      children: [
+        for (final section in const [
+          'Reimbursement',
+          'Salary Structure',
+          'Bonus & Incentives',
+        ])
+          ChoiceChip(
+            label: Text(section),
+            selected: _selectedHrPayrollSection == section,
+            onSelected: (_) => _selectHrPayrollSection(section),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildHrReimbursementPanel() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            OutlinedButton.icon(
+              onPressed: _isAdminReimbursementLoading
+                  ? null
+                  : () => _pickReimbursementDate(admin: true),
+              icon: const Icon(Icons.calendar_today),
+              label: Text(
+                _readableDate(
+                  _selectedAdminReimbursementDate.toIso8601String(),
+                ),
+              ),
+            ),
+            OutlinedButton.icon(
+              onPressed: _isAdminReimbursementLoading
+                  ? null
+                  : _loadAdminReimbursements,
+              icon: const Icon(Icons.search),
+              label: const Text('Search'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 22),
+        _buildReimbursementTable(
+          rows: _adminReimbursements,
+          isLoading: _isAdminReimbursementLoading,
+          showEmployee: true,
+          emptyMessage: 'No reimbursements submitted for this date.',
+        ),
+      ],
+    );
+  }
+
+  Widget _buildHrSalaryStructurePanel() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildPayrollPeriodControls(),
+        const SizedBox(height: 16),
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 960),
+          child: Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.grey[200]!),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Salary Structure',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: const Color(0xFF1F2E5A),
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: [
+                    _buildEmployeeDropdown(
+                      selectedId: _selectedPayrollEmployeeId,
+                      label: 'Employee',
+                      onChanged: (value) =>
+                          setState(() => _selectedPayrollEmployeeId = value),
+                    ),
+                    _buildPayrollAmountField('Basic Salary', _salaryBasicCtrl),
+                    _buildPayrollAmountField(
+                      'Allowances',
+                      _salaryAllowancesCtrl,
+                    ),
+                    _buildPayrollAmountField(
+                      'Deductions',
+                      _salaryDeductionsCtrl,
+                    ),
+                    _buildPayrollAmountField('Tax Deducted', _salaryTaxCtrl),
+                    _buildPayrollAmountField('Bonus', _salaryBonusCtrl),
+                    _buildPayrollAmountField(
+                      'Incentives',
+                      _salaryIncentivesCtrl,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton.icon(
+                  onPressed: _isPayrollSaving
+                      ? null
+                      : () => _saveSalaryRecord(),
+                  icon: _isPayrollSaving
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.receipt_long),
+                  label: const Text('Generate Payslip'),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 22),
+        _buildSalaryRecordsTable(),
+      ],
+    );
+  }
+
+  Widget _buildHrBonusIncentivesPanel() {
+    final existing = _selectedBonusEmployeeId == null
+        ? null
+        : _salaryRecordForEmployee(_selectedBonusEmployeeId!);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildPayrollPeriodControls(),
+        const SizedBox(height: 16),
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 760),
+          child: Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.grey[200]!),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Bonus & Incentives',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: const Color(0xFF1F2E5A),
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: [
+                    _buildEmployeeDropdown(
+                      selectedId: _selectedBonusEmployeeId,
+                      label: 'Employee',
+                      onChanged: (value) =>
+                          setState(() => _selectedBonusEmployeeId = value),
+                    ),
+                    _buildPayrollAmountField('Bonus', _bonusAmountCtrl),
+                    _buildPayrollAmountField(
+                      'Incentives',
+                      _incentiveAmountCtrl,
+                    ),
+                  ],
+                ),
+                if (_selectedBonusEmployeeId != null && existing == null) ...[
+                  const SizedBox(height: 12),
+                  _buildEmptyStateMessage(
+                    'Create this employee salary structure before adding bonus.',
+                  ),
+                ],
+                const SizedBox(height: 16),
+                ElevatedButton.icon(
+                  onPressed: _isPayrollSaving
+                      ? null
+                      : () => _saveSalaryRecord(bonusOnly: true),
+                  icon: _isPayrollSaving
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.add_card),
+                  label: const Text('Save Bonus'),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 22),
+        _buildSalaryRecordsTable(),
+      ],
+    );
+  }
+
+  Widget _buildPayrollPeriodControls() {
+    return Wrap(
+      spacing: 12,
+      runSpacing: 12,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        SizedBox(
+          width: 180,
+          child: DropdownButtonFormField<String>(
+            initialValue: _selectedPayrollMonth,
+            decoration: _salaryInputDecoration(label: 'Month'),
+            items: [
+              for (var i = 1; i <= 12; i++)
+                DropdownMenuItem(
+                  value: _monthName(i),
+                  child: Text(_monthName(i)),
+                ),
+            ],
+            onChanged: (value) {
+              if (value == null) return;
+              setState(() => _selectedPayrollMonth = value);
+              _loadAdminSalaryRecords();
+            },
+          ),
+        ),
+        SizedBox(
+          width: 140,
+          child: DropdownButtonFormField<String>(
+            initialValue: _selectedPayrollYear,
+            decoration: _salaryInputDecoration(label: 'Year'),
+            items: List.generate(6, (index) {
+              final year = (DateTime.now().year - 2 + index).toString();
+              return DropdownMenuItem(value: year, child: Text(year));
+            }),
+            onChanged: (value) {
+              if (value == null) return;
+              setState(() => _selectedPayrollYear = value);
+              _loadAdminSalaryRecords();
+            },
+          ),
+        ),
+        OutlinedButton.icon(
+          onPressed: _isSalaryRecordsLoading ? null : _loadAdminSalaryRecords,
+          icon: const Icon(Icons.search),
+          label: const Text('Search'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildEmployeeDropdown({
+    required int? selectedId,
+    required String label,
+    required ValueChanged<int?> onChanged,
+  }) {
+    final employees = _adminEmployeeMaps();
+    return SizedBox(
+      width: 260,
+      child: DropdownButtonFormField<int>(
+        initialValue: selectedId,
+        decoration: _salaryInputDecoration(label: label),
+        items: employees.map((employee) {
+          final id = _employeeId(employee);
+          return DropdownMenuItem<int>(
+            value: id,
+            child: Text(
+              _employeeDisplayName(employee),
+              overflow: TextOverflow.ellipsis,
+            ),
+          );
+        }).toList(),
+        onChanged: onChanged,
+      ),
+    );
+  }
+
+  Widget _buildPayrollAmountField(
+    String label,
+    TextEditingController controller,
+  ) {
+    return SizedBox(
+      width: 190,
+      child: TextField(
+        controller: controller,
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        decoration: _salaryInputDecoration(label: label),
+      ),
+    );
+  }
+
+  Widget _buildSalaryRecordsTable() {
+    if (_isSalaryRecordsLoading && _adminSalaryRecords.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.all(24),
+        child: CircularProgressIndicator(),
+      );
+    }
+    if (_adminSalaryRecords.isEmpty) {
+      return _buildReportMessage(
+        icon: Icons.payments_outlined,
+        title: 'No salary records',
+        message: 'No salary structure has been generated for this period.',
+      );
+    }
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.grey[200]!),
+      ),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: DataTable(
+          columns: const [
+            DataColumn(label: Text('Employee')),
+            DataColumn(label: Text('Month')),
+            DataColumn(label: Text('Basic')),
+            DataColumn(label: Text('Allowances')),
+            DataColumn(label: Text('Bonus')),
+            DataColumn(label: Text('Incentives')),
+            DataColumn(label: Text('Deductions')),
+            DataColumn(label: Text('Tax')),
+            DataColumn(label: Text('Net Salary')),
+          ],
+          rows: _adminSalaryRecords.map((record) {
+            return DataRow(
+              cells: [
+                DataCell(Text(record['employee_name']?.toString() ?? '-')),
+                DataCell(
+                  Text(
+                    '${_monthName((record['month'] as num?)?.toInt() ?? 1)} ${record['year'] ?? ''}',
+                  ),
+                ),
+                DataCell(Text(_moneyLabel(record['basic_salary']))),
+                DataCell(Text(_moneyLabel(record['allowances']))),
+                DataCell(Text(_moneyLabel(record['bonus']))),
+                DataCell(Text(_moneyLabel(record['incentives']))),
+                DataCell(Text(_moneyLabel(record['deductions']))),
+                DataCell(Text(_moneyLabel(record['tax_deducted']))),
+                DataCell(Text(_moneyLabel(record['net_salary']))),
+              ],
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildReimbursementTable({
+    required List<Map<String, dynamic>> rows,
+    required bool isLoading,
+    required bool showEmployee,
+    required String emptyMessage,
+  }) {
+    if (isLoading && rows.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.all(24),
+        child: CircularProgressIndicator(),
+      );
+    }
+    if (rows.isEmpty) {
+      return _buildReportMessage(
+        icon: Icons.receipt_long,
+        title: 'No reimbursement data',
+        message: emptyMessage,
+      );
+    }
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.grey[200]!),
+      ),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: DataTable(
+          columns: [
+            if (showEmployee) const DataColumn(label: Text('Employee')),
+            const DataColumn(label: Text('Date')),
+            const DataColumn(label: Text('Reason')),
+            const DataColumn(label: Text('PDF')),
+            const DataColumn(label: Text('Submitted')),
+          ],
+          rows: rows.map((row) {
+            final pdfData = row['pdf_data']?.toString() ?? '';
+            final cells = <DataCell>[
+              if (showEmployee)
+                DataCell(Text(row['employee_name']?.toString() ?? '-')),
+              DataCell(
+                Text(_readableDate(row['expense_date']?.toString() ?? '')),
+              ),
+              DataCell(
+                SizedBox(
+                  width: 260,
+                  child: Text(
+                    row['reason']?.toString() ?? '-',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+              DataCell(
+                TextButton.icon(
+                  onPressed: pdfData.isEmpty
+                      ? null
+                      : () => _downloadReimbursementPdf(row),
+                  icon: const Icon(Icons.download),
+                  label: Text(row['file_name']?.toString() ?? 'Download PDF'),
+                ),
+              ),
+              DataCell(
+                Text(_readableDate(row['submitted_at']?.toString() ?? '')),
+              ),
+            ];
+            return DataRow(cells: cells);
+          }).toList(),
+        ),
+      ),
     );
   }
 
@@ -7245,83 +9117,467 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildHrDashboardView() {
-    final tasks = _userSection('tasks');
-    final leaves = _userSection('leaves');
+    if (_selectedHrDashboardDetail == 'Total Employees') {
+      return _buildHrTotalEmployeesDetail();
+    }
+    if (_selectedHrDashboardDetail == 'Present Today') {
+      return _buildHrAttendanceDetail('Present Today', 'Present');
+    }
+    if (_selectedHrDashboardDetail == 'Absent Today') {
+      return _buildHrAttendanceDetail('Absent Today', 'Absent');
+    }
+    if (_selectedHrDashboardDetail == 'Leaves') {
+      return _buildHrLeavesDetail();
+    }
+
+    final summary = _adminDashboard?['summary'] as Map<String, dynamic>?;
+    final totalEmployees = _readInt(summary, 'total_employees');
+    final presentToday = _readInt(summary, 'present_today');
+    final absentToday = _readInt(summary, 'absent_today');
+    final todaysLeaves = _hrLeaveItemsForDate(_selectedHrDashboardDate).length;
     return SingleChildScrollView(
       padding: const EdgeInsets.all(32),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildSectionHeader(
-            'HR Dashboard - ${_currentUser?['name'] ?? 'HR'}',
-            'Manage people operations, attendance, recruitment, payroll, and performance.',
-          ),
-          const SizedBox(height: 28),
+          _buildWelcomeQuoteBanner(_currentDisplayName('HR'), 'HR'),
+          const SizedBox(height: 24),
           Row(
             children: [
               Expanded(
-                child: _buildSummaryTile(
-                  'Open Roles',
-                  '0',
-                  Icons.work_outline,
-                  const Color(0xFF2B5AF0),
+                child: _buildSectionHeader(
+                  'HR Dashboard',
+                  'Review workforce status and open focused HR dashboards.',
                 ),
               ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: _buildSummaryTile(
-                  'Pending Onboarding',
-                  _readInt(tasks, 'assigned').toString(),
-                  Icons.person_add_alt,
-                  const Color(0xFF1ABE8E),
+              IconButton.filled(
+                tooltip: 'Refresh dashboard',
+                onPressed: _isDashboardLoading ? null : refreshDashboardData,
+                style: IconButton.styleFrom(
+                  backgroundColor: const Color(0xFF2B5AF0),
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: Colors.grey[300],
                 ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: _buildSummaryTile(
-                  'Leave Requests',
-                  _readInt(leaves, 'applied').toString(),
-                  Icons.event_note,
-                  Colors.orange,
-                ),
+                icon: _isDashboardLoading
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(Icons.refresh),
               ),
             ],
           ),
-          const SizedBox(height: 28),
-          GridView.count(
-            crossAxisCount: 2,
+          const SizedBox(height: 24),
+          if (_isDashboardLoading)
+            const LinearProgressIndicator()
+          else if (_dashboardError != null)
+            _buildReportMessage(
+              icon: Icons.error_outline,
+              title: 'Dashboard not connected',
+              message: _dashboardError!,
+              actionLabel: 'Retry',
+              onAction: loadDashboardData,
+            ),
+          if (_isDashboardLoading || _dashboardError != null)
+            const SizedBox(height: 24),
+          GridView.extent(
+            maxCrossAxisExtent: 280,
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             mainAxisSpacing: 16,
             crossAxisSpacing: 16,
-            childAspectRatio: 2.6,
+            childAspectRatio: 1.9,
             children: [
-              _buildEmployeeReportCard(
-                'Employee Management',
-                'Staff directory, onboarding, and employee profiles',
+              _buildSummaryTile(
+                'Total Employees',
+                totalEmployees.toString(),
                 Icons.groups,
-                const Color(0xFF1ABE8E),
-              ),
-              _buildEmployeeReportCard(
-                'Attendance Management',
-                'Daily attendance, insights, and attendance reports',
-                Icons.access_time,
                 const Color(0xFF2B5AF0),
+                isCompact: true,
+                onTap: () => setState(
+                  () => _selectedHrDashboardDetail = 'Total Employees',
+                ),
               ),
-              _buildEmployeeReportCard(
-                'Recruitment',
-                'Job openings, candidates, and interviews',
-                Icons.how_to_reg,
-                Colors.orange,
+              _buildSummaryTile(
+                'Present Today',
+                presentToday.toString(),
+                Icons.event_available,
+                const Color(0xFF1ABE8E),
+                isCompact: true,
+                onTap: () => setState(
+                  () => _selectedHrDashboardDetail = 'Present Today',
+                ),
               ),
-              _buildEmployeeReportCard(
-                'Payroll',
-                'Salary management, payslips, and payroll reports',
-                Icons.account_balance_wallet,
-                Colors.purple,
+              _buildSummaryTile(
+                'Absent Today',
+                absentToday.toString(),
+                Icons.event_busy,
+                Colors.red,
+                isCompact: true,
+                onTap: () =>
+                    setState(() => _selectedHrDashboardDetail = 'Absent Today'),
+              ),
+              _buildSummaryTile(
+                'Leaves',
+                todaysLeaves.toString(),
+                Icons.calendar_today,
+                Colors.teal,
+                isCompact: true,
+                onTap: () =>
+                    setState(() => _selectedHrDashboardDetail = 'Leaves'),
               ),
             ],
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHrDetailScaffold({
+    required String title,
+    required String subtitle,
+    required Widget child,
+  }) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(32),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              IconButton(
+                tooltip: 'Back',
+                onPressed: () =>
+                    setState(() => _selectedHrDashboardDetail = ''),
+                icon: const Icon(Icons.arrow_back),
+              ),
+              const SizedBox(width: 8),
+              Expanded(child: _buildSectionHeader(title, subtitle)),
+            ],
+          ),
+          const SizedBox(height: 24),
+          child,
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHrEmployeeDropdown() {
+    final employees = _adminEmployeeMaps();
+    final selected =
+        employees.any(
+          (employee) => _employeeId(employee) == _selectedHrDashboardEmployeeId,
+        )
+        ? _selectedHrDashboardEmployeeId
+        : null;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth.isFinite
+            ? constraints.maxWidth.clamp(180.0, 320.0)
+            : 320.0;
+        Widget dropdownText(String value) {
+          return Text(value, maxLines: 1, overflow: TextOverflow.ellipsis);
+        }
+
+        return SizedBox(
+          width: width,
+          child: DropdownButtonFormField<int?>(
+            initialValue: selected,
+            isExpanded: true,
+            decoration: const InputDecoration(
+              labelText: 'Employee',
+              border: OutlineInputBorder(),
+              isDense: true,
+              contentPadding: EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 12,
+              ),
+            ),
+            items: [
+              DropdownMenuItem<int?>(
+                value: null,
+                child: dropdownText('All Employees'),
+              ),
+              ...employees.map((employee) {
+                return DropdownMenuItem<int?>(
+                  value: _employeeId(employee),
+                  child: dropdownText(_employeeDisplayName(employee)),
+                );
+              }),
+            ],
+            onChanged: (value) {
+              setState(() => _selectedHrDashboardEmployeeId = value);
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  List<Map<String, dynamic>> _hrFilteredEmployees() {
+    final employees = _adminEmployeeMaps();
+    if (_selectedHrDashboardEmployeeId == null) return employees;
+    return employees
+        .where(
+          (employee) => _employeeId(employee) == _selectedHrDashboardEmployeeId,
+        )
+        .toList();
+  }
+
+  Widget _buildHrTotalEmployeesDetail() {
+    final employees = _hrFilteredEmployees();
+    return _buildHrDetailScaffold(
+      title: 'Total Employees',
+      subtitle: 'Select an employee or review the complete employee list.',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildHrEmployeeDropdown(),
+          const SizedBox(height: 20),
+          if (employees.isEmpty)
+            _buildReportMessage(
+              icon: Icons.people_outline,
+              title: 'No employees found',
+              message: 'Employees will appear here after they are added.',
+            )
+          else
+            _buildHrEmployeesTable(employees),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHrEmployeesTable(List<Map<String, dynamic>> employees) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: Colors.grey[200]!),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: DataTable(
+          columns: const [
+            DataColumn(label: Text('Employee Name')),
+            DataColumn(label: Text('Username')),
+            DataColumn(label: Text('Email')),
+            DataColumn(label: Text('Department')),
+            DataColumn(label: Text('Designation')),
+            DataColumn(label: Text('Status')),
+          ],
+          rows: employees.map((employee) {
+            return DataRow(
+              cells: [
+                DataCell(Text(employee['name']?.toString() ?? '-')),
+                DataCell(Text(employee['username']?.toString() ?? '-')),
+                DataCell(Text(employee['email']?.toString() ?? '-')),
+                DataCell(Text(employee['department']?.toString() ?? '-')),
+                DataCell(Text(employee['designation']?.toString() ?? '-')),
+                DataCell(
+                  _buildStatusPill(
+                    employee['is_active'] == true ? 'Active' : 'Inactive',
+                  ),
+                ),
+              ],
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+
+  List<Map<String, dynamic>> _hrAttendanceRowsByStatus(String status) {
+    final rows = _adminAttendance?['rows'] as List<dynamic>? ?? [];
+    return rows.whereType<Map<String, dynamic>>().where((row) {
+      final rowEmployeeId = (row['employee_id'] as num?)?.toInt();
+      if (_selectedHrDashboardEmployeeId != null &&
+          rowEmployeeId != _selectedHrDashboardEmployeeId) {
+        return false;
+      }
+      return row['status']?.toString() == status;
+    }).toList();
+  }
+
+  Widget _buildHrAttendanceDetail(String title, String status) {
+    final rows = _hrAttendanceRowsByStatus(status);
+    return _buildHrDetailScaffold(
+      title: title,
+      subtitle: 'Review employees marked $status for today.',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildHrEmployeeDropdown(),
+          const SizedBox(height: 20),
+          if (rows.isEmpty)
+            _buildReportMessage(
+              icon: Icons.event_note,
+              title: 'No attendance rows',
+              message: 'No employees match this status today.',
+            )
+          else
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                border: Border.all(color: Colors.grey[200]!),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: DataTable(
+                  columns: const [
+                    DataColumn(label: Text('Employee')),
+                    DataColumn(label: Text('Username')),
+                    DataColumn(label: Text('Check In')),
+                    DataColumn(label: Text('Check Out')),
+                    DataColumn(label: Text('Hours')),
+                    DataColumn(label: Text('Status')),
+                  ],
+                  rows: rows.map((row) {
+                    final hours = (row['total_hours'] as num?)?.toDouble();
+                    return DataRow(
+                      cells: [
+                        DataCell(Text(row['employee']?.toString() ?? '-')),
+                        DataCell(Text(row['username']?.toString() ?? '-')),
+                        DataCell(Text(row['check_in']?.toString() ?? '-')),
+                        DataCell(Text(row['check_out']?.toString() ?? '-')),
+                        DataCell(Text(hours?.toStringAsFixed(2) ?? '-')),
+                        DataCell(
+                          _buildStatusPill(row['status']?.toString() ?? '-'),
+                        ),
+                      ],
+                    );
+                  }).toList(),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  List<Map<String, dynamic>> _hrLeaveItemsForDate(DateTime date) {
+    final selected = _dateOnly(date);
+    final selectedEmployee = _selectedHrDashboardEmployeeId == null
+        ? null
+        : _adminEmployeeMaps().firstWhere(
+            (employee) =>
+                _employeeId(employee) == _selectedHrDashboardEmployeeId,
+            orElse: () => <String, dynamic>{},
+          );
+    final selectedEmployeeName = selectedEmployee == null
+        ? null
+        : _employeeDisplayName(selectedEmployee).toLowerCase();
+    final items = _adminPendingWorkItems()
+        .where((item) => item['kind']?.toString() == 'leave')
+        .where((item) {
+          final fromDate = DateTime.tryParse(
+            item['from_date']?.toString() ?? '',
+          );
+          final toDate = DateTime.tryParse(item['to_date']?.toString() ?? '');
+          if (fromDate == null || toDate == null) return false;
+          final from = _dateOnly(fromDate);
+          final to = _dateOnly(toDate);
+          if (selected.isBefore(from) || selected.isAfter(to)) return false;
+          if (selectedEmployeeName == null) return true;
+          final employeeName = item['employee']?.toString().toLowerCase() ?? '';
+          return employeeName == selectedEmployeeName ||
+              employeeName.contains(selectedEmployeeName);
+        })
+        .toList();
+    return items;
+  }
+
+  Widget _buildHrLeavesDetail() {
+    final leaves = _hrLeaveItemsForDate(_selectedHrDashboardDate);
+    return _buildHrDetailScaffold(
+      title: 'Leaves',
+      subtitle: 'Review employee leaves for a selected day.',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              _buildHrEmployeeDropdown(),
+              SizedBox(
+                width: 230,
+                child: OutlinedButton.icon(
+                  onPressed: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: _selectedHrDashboardDate,
+                      firstDate: DateTime(DateTime.now().year - 2),
+                      lastDate: DateTime(DateTime.now().year + 2),
+                    );
+                    if (picked != null) {
+                      setState(() => _selectedHrDashboardDate = picked);
+                    }
+                  },
+                  icon: const Icon(Icons.calendar_today),
+                  label: Text(
+                    _readableDate(_selectedHrDashboardDate.toIso8601String()),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          if (leaves.isEmpty)
+            _buildReportMessage(
+              icon: Icons.event_busy,
+              title: 'No leaves found',
+              message: 'No employee leave records match this date.',
+            )
+          else
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                border: Border.all(color: Colors.grey[200]!),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: DataTable(
+                  columns: const [
+                    DataColumn(label: Text('Employee')),
+                    DataColumn(label: Text('Leave Type')),
+                    DataColumn(label: Text('From')),
+                    DataColumn(label: Text('To')),
+                    DataColumn(label: Text('Days')),
+                    DataColumn(label: Text('Status')),
+                  ],
+                  rows: leaves.map((leave) {
+                    return DataRow(
+                      cells: [
+                        DataCell(Text(leave['employee']?.toString() ?? '-')),
+                        DataCell(Text(leave['title']?.toString() ?? '-')),
+                        DataCell(
+                          Text(
+                            _readableDate(leave['from_date']?.toString() ?? ''),
+                          ),
+                        ),
+                        DataCell(
+                          Text(
+                            _readableDate(leave['to_date']?.toString() ?? ''),
+                          ),
+                        ),
+                        DataCell(Text(leave['days']?.toString() ?? '-')),
+                        DataCell(
+                          _buildStatusPill(leave['status']?.toString() ?? '-'),
+                        ),
+                      ],
+                    );
+                  }).toList(),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -7378,6 +9634,154 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  Widget _buildHrLeavesView() {
+    final requests =
+        (_adminDashboard?['pending_requests'] as Map<String, dynamic>?) ?? {};
+    final leaves = (requests['leaves'] as List<dynamic>? ?? [])
+        .whereType<Map<String, dynamic>>()
+        .toList();
+    final pending = leaves.where((leave) {
+      return (leave['status']?.toString().toLowerCase() ?? '') == 'pending';
+    }).toList();
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(32),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSectionHeader(
+            'Leaves',
+            'Review and manage employee leave requests.',
+          ),
+          const SizedBox(height: 28),
+          Row(
+            children: [
+              Expanded(
+                child: _buildSummaryTile(
+                  'Total Requests',
+                  leaves.length.toString(),
+                  Icons.calendar_today,
+                  Colors.teal,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: _buildSummaryTile(
+                  'Pending',
+                  pending.length.toString(),
+                  Icons.pending_actions,
+                  Colors.orange,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: _buildSummaryTile(
+                  'Approved',
+                  leaves
+                      .where(
+                        (leave) =>
+                            leave['status']?.toString().toLowerCase() ==
+                            'approved',
+                      )
+                      .length
+                      .toString(),
+                  Icons.verified_outlined,
+                  const Color(0xFF1ABE8E),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 28),
+          if (leaves.isEmpty)
+            _buildReportMessage(
+              icon: Icons.event_busy,
+              title: 'No leave requests found',
+              message: 'Employee leave requests will appear here.',
+              actionLabel: 'Refresh',
+              onAction: loadDashboardData,
+            )
+          else
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                border: Border.all(color: Colors.grey[200]!),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: DataTable(
+                  columns: const [
+                    DataColumn(label: Text('Employee')),
+                    DataColumn(label: Text('Leave Type')),
+                    DataColumn(label: Text('From')),
+                    DataColumn(label: Text('To')),
+                    DataColumn(label: Text('Days')),
+                    DataColumn(label: Text('Status')),
+                    DataColumn(label: Text('Action')),
+                  ],
+                  rows: leaves.map((leave) {
+                    final id = (leave['id'] as num?)?.toInt() ?? 0;
+                    final status =
+                        leave['status']?.toString().toLowerCase() ?? '';
+                    final isPending = status == 'pending';
+                    return DataRow(
+                      cells: [
+                        DataCell(Text(leave['employee']?.toString() ?? '-')),
+                        DataCell(Text(leave['type']?.toString() ?? '-')),
+                        DataCell(
+                          Text(
+                            _readableDate(leave['from_date']?.toString() ?? ''),
+                          ),
+                        ),
+                        DataCell(
+                          Text(
+                            _readableDate(leave['to_date']?.toString() ?? ''),
+                          ),
+                        ),
+                        DataCell(Text(leave['days']?.toString() ?? '-')),
+                        DataCell(
+                          _buildStatusPill(
+                            leave['status_label']?.toString() ?? 'Pending',
+                          ),
+                        ),
+                        DataCell(
+                          Wrap(
+                            spacing: 8,
+                            children: [
+                              FilledButton(
+                                onPressed: isPending && id != 0
+                                    ? () => _updatePendingRequestStatus(
+                                        'leave',
+                                        id,
+                                        'approved',
+                                      )
+                                    : null,
+                                child: const Text('Approve'),
+                              ),
+                              OutlinedButton(
+                                onPressed: isPending && id != 0
+                                    ? () => _updatePendingRequestStatus(
+                                        'leave',
+                                        id,
+                                        'rejected',
+                                      )
+                                    : null,
+                                child: const Text('Reject'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    );
+                  }).toList(),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   Map<String, Object> _hrSectionConfig(String menu, String section) {
     IconData icon = Icons.dashboard_customize;
     Color color = const Color(0xFF2B5AF0);
@@ -7386,21 +9790,22 @@ class _HomePageState extends State<HomePage> {
     String message = '$section data will appear here when records are added.';
 
     if (menu == 'Employee Management') {
-      icon = section == 'Smart Onboarding'
-          ? Icons.person_add_alt
-          : section == 'Employee Profile'
-          ? Icons.badge_outlined
-          : Icons.groups;
+      icon = section == 'Add Employee' ? Icons.person_add_alt : Icons.groups;
       color = const Color(0xFF1ABE8E);
-      description =
-          'Manage staff directory, onboarding, and employee profiles.';
-    } else if (menu == 'Attendance Management') {
+      description = 'Add employees and edit employee details.';
+    } else if (menu == 'Attendance' || menu == 'Attendance Management') {
       icon = section == 'Attendance Insights'
           ? Icons.analytics_outlined
           : section == 'Attendance Reports'
           ? Icons.description_outlined
           : Icons.access_time;
       description = 'Monitor attendance activity, trends, and reports.';
+    } else if (menu == 'Employee Location') {
+      icon = section == 'Add Location'
+          ? Icons.add_location_alt_outlined
+          : Icons.edit_location_alt_outlined;
+      color = Colors.orange;
+      description = 'Add and edit employee attendance locations.';
     } else if (menu == 'Recruitment') {
       icon = section == 'Candidate Management'
           ? Icons.people_alt_outlined
@@ -7417,6 +9822,19 @@ class _HomePageState extends State<HomePage> {
           : Icons.account_balance_wallet;
       color = Colors.purple;
       description = 'Manage salary, payslips, and payroll reporting.';
+    } else if (menu == 'Employee Payroll') {
+      icon = Icons.account_balance_wallet;
+      color = Colors.purple;
+      primaryLabel = 'Payroll';
+      description = 'Manage employee payroll operations.';
+      message =
+          'Employee payroll data will appear here when records are added.';
+    } else if (menu == 'Leaves') {
+      icon = Icons.calendar_today;
+      color = Colors.teal;
+      primaryLabel = 'Leaves';
+      description = 'Manage employee leave operations.';
+      message = 'Employee leave data will appear here when records are added.';
     } else if (menu == 'Performance') {
       icon = section == 'Evaluations'
           ? Icons.fact_check_outlined
@@ -7524,24 +9942,88 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildSectionHeader(String title, String subtitle) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          style: Theme.of(context).textTheme.displaySmall?.copyWith(
-            color: const Color(0xFF1F2E5A),
-            fontWeight: FontWeight.bold,
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(4, 2, 4, 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 42,
+            height: 4,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(999),
+              gradient: const LinearGradient(colors: [_brandTeal, _brandBlue]),
+            ),
           ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          subtitle,
-          style: Theme.of(
-            context,
-          ).textTheme.bodyMedium?.copyWith(color: Colors.grey[600]),
-        ),
-      ],
+          const SizedBox(height: 12),
+          Text(
+            title,
+            style: Theme.of(context).textTheme.displaySmall?.copyWith(
+              color: _inkBlue,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            subtitle,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: const Color(0xFF64748B),
+              height: 1.35,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWelcomeQuoteBanner(String name, String roleLabel) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _lineColor),
+        boxShadow: _softShadow(0.05),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: const Color(0xFF1ABE8E).withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(Icons.format_quote, color: Color(0xFF1ABE8E)),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Welcome, $name',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    color: const Color(0xFF1F2E5A),
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  '$roleLabel quote of the day: "${_dailyPositiveQuote()}"',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.copyWith(color: Colors.grey[700]),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -7551,17 +10033,27 @@ class _HomePageState extends State<HomePage> {
     IconData icon,
     Color color, {
     bool isCompact = false,
+    VoidCallback? onTap,
   }) {
-    return Container(
+    final tile = Container(
       padding: EdgeInsets.all(isCompact ? 14 : 20),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey[200]!),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _lineColor),
+        boxShadow: _softShadow(0.05),
       ),
       child: Row(
         children: [
-          Icon(icon, color: color, size: isCompact ? 24 : 32),
+          Container(
+            width: isCompact ? 38 : 46,
+            height: isCompact ? 38 : 46,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(icon, color: color, size: isCompact ? 21 : 25),
+          ),
           SizedBox(width: isCompact ? 10 : 14),
           Expanded(
             child: Column(
@@ -7575,21 +10067,31 @@ class _HomePageState extends State<HomePage> {
                               ? Theme.of(context).textTheme.titleLarge
                               : Theme.of(context).textTheme.headlineSmall)
                           ?.copyWith(
-                            color: const Color(0xFF1F2E5A),
+                            color: _inkBlue,
                             fontWeight: FontWeight.bold,
                           ),
                 ),
                 SizedBox(height: isCompact ? 2 : 4),
                 Text(
                   title,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodySmall?.copyWith(color: Colors.grey[600]),
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: const Color(0xFF64748B),
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ],
             ),
           ),
         ],
+      ),
+    );
+    if (onTap == null) return tile;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: tile,
       ),
     );
   }
@@ -7645,23 +10147,30 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildStatusPill(String status) {
+  Widget _buildStatusPill(String status, {Color? color}) {
     final positiveStatuses = ['Present', 'Active', 'Approved'];
     final negativeStatuses = ['Absent', 'Inactive', 'Rejected'];
-    final color = positiveStatuses.contains(status)
-        ? const Color(0xFF1ABE8E)
-        : negativeStatuses.contains(status)
-        ? Colors.red
-        : Colors.orange;
+    final pillColor =
+        color ??
+        (positiveStatuses.contains(status)
+            ? const Color(0xFF1ABE8E)
+            : negativeStatuses.contains(status)
+            ? Colors.red
+            : Colors.orange);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(16),
+        color: pillColor.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: pillColor.withValues(alpha: 0.22)),
       ),
       child: Text(
         status,
-        style: TextStyle(color: color, fontWeight: FontWeight.w600),
+        style: TextStyle(
+          color: pillColor,
+          fontWeight: FontWeight.w800,
+          fontSize: 12,
+        ),
       ),
     );
   }
@@ -7718,6 +10227,8 @@ class _HomePageState extends State<HomePage> {
               ),
             ],
           ),
+          const SizedBox(height: 20),
+          _buildWelcomeQuoteBanner(_currentDisplayName('Admin'), 'Admin'),
           const SizedBox(height: 48),
           if (_isDashboardLoading)
             const LinearProgressIndicator()
@@ -7745,7 +10256,10 @@ class _HomePageState extends State<HomePage> {
                 _readInt(summary, 'total_employees').toString(),
                 Icons.people,
                 const Color(0xFF2B5AF0),
-                onTap: _showTotalEmployeesDialog,
+                onTap: () {
+                  setState(() => _selectedMenu = 'Total Employees');
+                  loadDashboardData();
+                },
               ),
               _buildAdminStatCard(
                 'Total Requests',
@@ -7755,54 +10269,15 @@ class _HomePageState extends State<HomePage> {
                 onTap: () {
                   setState(() {
                     _selectedMenu = 'Pending Requests';
-                    _selectedPendingRequestStatus = 'all';
+                    _selectedPendingRequestStatus = 'pending';
                   });
                   loadDashboardData();
                 },
               ),
             ],
           ),
-          const SizedBox(height: 48),
-          _buildAdminPendingWorksSection(),
         ],
       ),
-    );
-  }
-
-  void _showTotalEmployeesDialog() {
-    final employees = _adminEmployeeMaps();
-    showDialog<void>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: Text('Total Employees (${employees.length})'),
-          content: SizedBox(
-            width: 520,
-            child: employees.isEmpty
-                ? const Text('No employees found.')
-                : SingleChildScrollView(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: employees.map((employee) {
-                        return ListTile(
-                          leading: const Icon(Icons.person),
-                          title: Text(employee['name']?.toString() ?? '-'),
-                          subtitle: Text(
-                            'Username: ${employee['username']?.toString() ?? '-'}',
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                  ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Close'),
-            ),
-          ],
-        );
-      },
     );
   }
 
@@ -7821,6 +10296,9 @@ class _HomePageState extends State<HomePage> {
           'type': 'Leave Request',
           'employee': item['employee']?.toString() ?? '-',
           'title': item['type']?.toString() ?? 'Leave',
+          'from_date': item['from_date']?.toString() ?? '',
+          'to_date': item['to_date']?.toString() ?? '',
+          'days': item['days']?.toString() ?? '-',
           'meta':
               '${_readableDate(item['from_date']?.toString() ?? '')} - ${_readableDate(item['to_date']?.toString() ?? '')}',
           'status_value': item['status']?.toString() ?? 'pending',
@@ -7854,103 +10332,96 @@ class _HomePageState extends State<HomePage> {
     ];
   }
 
-  Widget _buildAdminPendingWorksSection() {
-    final items = _adminPendingWorkItems();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Total Requests From Users',
-          style: Theme.of(
-            context,
-          ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 14),
-        if (items.isEmpty)
-          _buildReportMessage(
-            icon: Icons.task_alt,
-            title: 'No requests',
-            message: 'User requests will appear here after employees submit.',
-          )
-        else
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-              maxCrossAxisExtent: 320,
-              mainAxisExtent: 184,
-              mainAxisSpacing: 16,
-              crossAxisSpacing: 16,
-            ),
-            itemCount: items.length,
-            itemBuilder: (context, index) {
-              final item = items[index];
-              return Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.grey[200]!),
+  Widget _buildTotalEmployeesDashboard() {
+    final employees = _adminEmployeeMaps();
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(32),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              IconButton(
+                tooltip: 'Back',
+                onPressed: () => setState(() {
+                  _selectedMenu = 'Dashboard';
+                  _selectedHrDashboardDetail = '';
+                }),
+                icon: const Icon(Icons.arrow_back),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildSectionHeader(
+                  'Total Employees',
+                  'View all employees and open employee management from one place.',
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            item['type']?.toString() ?? 'Pending Work',
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Color(0xFF1F2E5A),
-                              fontWeight: FontWeight.w800,
-                            ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+          if (employees.isEmpty)
+            _buildReportMessage(
+              icon: Icons.people_outline,
+              title: 'No employees found',
+              message: 'Employees will appear here after they are added.',
+              actionLabel: 'Refresh',
+              onAction: loadDashboardData,
+            )
+          else
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                border: Border.all(color: Colors.grey[200]!),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: DataTable(
+                  columns: const [
+                    DataColumn(label: Text('Employee Name')),
+                    DataColumn(label: Text('Employee Username')),
+                    DataColumn(label: Text('Email')),
+                    DataColumn(label: Text('Department')),
+                    DataColumn(label: Text('Status')),
+                    DataColumn(label: Text('Action')),
+                  ],
+                  rows: employees.map((employee) {
+                    return DataRow(
+                      cells: [
+                        DataCell(Text(employee['name']?.toString() ?? '-')),
+                        DataCell(Text(employee['username']?.toString() ?? '-')),
+                        DataCell(Text(employee['email']?.toString() ?? '-')),
+                        DataCell(
+                          Text(employee['department']?.toString() ?? '-'),
+                        ),
+                        DataCell(
+                          _buildStatusPill(
+                            employee['is_active'] == true
+                                ? 'Active'
+                                : 'Inactive',
                           ),
                         ),
-                        _buildStatusPill(
-                          item['status']?.toString() ?? 'Pending',
+                        DataCell(
+                          TextButton.icon(
+                            onPressed: () {
+                              _selectEditEmployee(_employeeId(employee));
+                              setState(() {
+                                _selectedMenu = 'Employee Management';
+                                _selectedAttendanceSection = 'Edit Employee';
+                              });
+                            },
+                            icon: const Icon(Icons.edit),
+                            label: const Text('Edit'),
+                          ),
                         ),
                       ],
-                    ),
-                    const SizedBox(height: 10),
-                    Text(
-                      item['employee']?.toString() ?? '-',
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: Colors.grey[600], fontSize: 12),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      item['title']?.toString() ?? '-',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Color(0xFF1F2E5A),
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      item['meta']?.toString() ?? '-',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: Colors.grey[600], fontSize: 12),
-                    ),
-                    const Spacer(),
-                    TextButton(
-                      onPressed: () {
-                        setState(() {
-                          _selectedMenu = 'Pending Requests';
-                          _selectedPendingRequestStatus = 'all';
-                        });
-                      },
-                      child: const Text('View request'),
-                    ),
-                  ],
+                    );
+                  }).toList(),
                 ),
-              );
-            },
-          ),
-      ],
+              ),
+            ),
+        ],
+      ),
     );
   }
 
@@ -8065,15 +10536,19 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildPendingRequestsDashboard() {
     final items = _adminPendingWorkItems();
+    const requestStatuses = {'pending', 'approved', 'rejected'};
+    final selectedStatus =
+        requestStatuses.contains(_selectedPendingRequestStatus)
+        ? _selectedPendingRequestStatus
+        : 'pending';
     final filtered = items.where((item) {
       final status = (item['status_value']?.toString() ?? '').toLowerCase();
-      if (_selectedPendingRequestStatus == 'all') return true;
-      if (_selectedPendingRequestStatus == 'pending') {
+      if (selectedStatus == 'pending') {
         return status == 'pending' ||
             status == 'open' ||
             status == 'in_progress';
       }
-      if (_selectedPendingRequestStatus == 'approved') {
+      if (selectedStatus == 'approved') {
         return status == 'approved' || status == 'resolved';
       }
       return status == 'rejected' || status == 'closed';
@@ -8086,20 +10561,19 @@ class _HomePageState extends State<HomePage> {
         children: [
           _buildSectionHeader(
             'Total Requests Dashboard',
-            'Review approved, rejected, and pending user requests.',
+            'Review user requests by pending, approved, or rejected status.',
           ),
           const SizedBox(height: 28),
           SizedBox(
-            width: 280,
+            width: 220,
             child: DropdownButtonFormField<String>(
-              initialValue: _selectedPendingRequestStatus,
+              initialValue: selectedStatus,
               decoration: const InputDecoration(
-                labelText: 'Request Status',
+                labelText: 'Status',
                 border: OutlineInputBorder(),
                 isDense: true,
               ),
               items: const [
-                DropdownMenuItem(value: 'all', child: Text('All')),
                 DropdownMenuItem(value: 'pending', child: Text('Pending')),
                 DropdownMenuItem(value: 'approved', child: Text('Approved')),
                 DropdownMenuItem(value: 'rejected', child: Text('Rejected')),
@@ -8127,23 +10601,24 @@ class _HomePageState extends State<HomePage> {
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: DataTable(
-                  columns: const [
-                    DataColumn(label: Text('Type')),
-                    DataColumn(label: Text('Employee')),
-                    DataColumn(label: Text('Details')),
-                    DataColumn(label: Text('Current')),
-                    DataColumn(label: Text('Change Status')),
-                    DataColumn(label: Text('Action')),
+                  columns: [
+                    const DataColumn(label: Text('Type')),
+                    const DataColumn(label: Text('Employee')),
+                    const DataColumn(label: Text('Details')),
+                    const DataColumn(label: Text('Current')),
+                    if (selectedStatus == 'pending') ...const [
+                      DataColumn(label: Text('Eligible')),
+                      DataColumn(label: Text('Action')),
+                    ],
                   ],
                   rows: filtered.map((item) {
                     final kind = item['kind']?.toString() ?? '';
                     final id = (item['id'] as num?)?.toInt() ?? 0;
                     final requestKey = _pendingRequestKey(kind, id);
-                    final action =
-                        _pendingRequestActions[requestKey] ??
-                        _pendingRequestActionFromStatus(
-                          item['status']?.toString() ?? 'Pending',
-                        );
+                    final selectedAction = _pendingRequestActions[requestKey];
+                    final action = selectedAction == 'reject'
+                        ? 'reject'
+                        : 'approve';
                     return DataRow(
                       cells: [
                         DataCell(Text(item['type']?.toString() ?? '-')),
@@ -8163,48 +10638,64 @@ class _HomePageState extends State<HomePage> {
                             item['status']?.toString() ?? 'Pending',
                           ),
                         ),
-                        DataCell(
-                          SizedBox(
-                            width: 180,
-                            child: DropdownButtonFormField<String>(
-                              initialValue: action,
-                              decoration: const InputDecoration(
-                                border: OutlineInputBorder(),
-                                isDense: true,
+                        if (selectedStatus == 'pending') ...[
+                          DataCell(
+                            SizedBox(
+                              width: 140,
+                              child: DropdownButtonFormField<String>(
+                                initialValue: action,
+                                decoration: const InputDecoration(
+                                  border: OutlineInputBorder(),
+                                  isDense: true,
+                                  contentPadding: EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 9,
+                                  ),
+                                ),
+                                items: const [
+                                  DropdownMenuItem(
+                                    value: 'approve',
+                                    child: Text('Approve'),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: 'reject',
+                                    child: Text('Reject'),
+                                  ),
+                                ],
+                                onChanged: (value) {
+                                  if (value == null) return;
+                                  setState(() {
+                                    _pendingRequestActions[requestKey] = value;
+                                  });
+                                },
                               ),
-                              items: const [
-                                DropdownMenuItem(
-                                  value: 'pending',
-                                  child: Text('Pending'),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'approve',
-                                  child: Text('Approve'),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'reject',
-                                  child: Text('Reject'),
-                                ),
-                              ],
-                              onChanged: (value) {
-                                if (value == null) return;
-                                setState(() {
-                                  _pendingRequestActions[requestKey] = value;
-                                });
-                              },
                             ),
                           ),
-                        ),
-                        DataCell(
-                          TextButton(
-                            onPressed: () => _updatePendingRequestStatus(
-                              kind,
-                              id,
-                              _statusValueForPendingAction(kind, action),
+                          DataCell(
+                            SizedBox(
+                              height: 32,
+                              child: FilledButton(
+                                style: FilledButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 14,
+                                  ),
+                                  textStyle: const TextStyle(fontSize: 12),
+                                ),
+                                onPressed: id == 0
+                                    ? null
+                                    : () => _updatePendingRequestStatus(
+                                        kind,
+                                        id,
+                                        _statusValueForPendingAction(
+                                          kind,
+                                          action,
+                                        ),
+                                      ),
+                                child: const Text('Submit'),
+                              ),
                             ),
-                            child: const Text('Submit'),
                           ),
-                        ),
+                        ],
                       ],
                     );
                   }).toList(),
@@ -8214,13 +10705,6 @@ class _HomePageState extends State<HomePage> {
         ],
       ),
     );
-  }
-
-  String _pendingRequestActionFromStatus(String status) {
-    final normalized = status.toLowerCase();
-    if (normalized == 'approved' || normalized == 'resolved') return 'approve';
-    if (normalized == 'rejected' || normalized == 'closed') return 'reject';
-    return 'pending';
   }
 
   String _statusValueForPendingAction(String kind, String action) {
@@ -8246,24 +10730,34 @@ class _HomePageState extends State<HomePage> {
     VoidCallback? onTap,
   }) {
     final card = Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[200]!),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _lineColor),
+        boxShadow: _softShadow(0.05),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 26, color: color),
-          const SizedBox(height: 8),
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(icon, size: 23, color: color),
+          ),
+          const SizedBox(height: 12),
           Text(
             title,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: Theme.of(
-              context,
-            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              color: _inkBlue,
+              fontWeight: FontWeight.w800,
+            ),
           ),
           const SizedBox(height: 6),
           Text(
@@ -8283,7 +10777,7 @@ class _HomePageState extends State<HomePage> {
     }
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(18),
       child: card,
     );
   }
@@ -8492,9 +10986,9 @@ class _HomePageState extends State<HomePage> {
   Widget _buildEmployeeEditDetailsCard(Map<String, dynamic> employee) {
     final location = employee['assigned_location'] as Map<String, dynamic>?;
     return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 920),
+      constraints: const BoxConstraints(maxWidth: 820),
       child: Container(
-        padding: const EdgeInsets.all(18),
+        padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(8),
@@ -8521,9 +11015,13 @@ class _HomePageState extends State<HomePage> {
             ),
             const SizedBox(height: 14),
             Wrap(
-              spacing: 14,
-              runSpacing: 14,
+              spacing: 12,
+              runSpacing: 12,
               children: [
+                _buildCompactEditField(
+                  'Display Name',
+                  _editEmployeeDisplayNameCtrl,
+                ),
                 _buildCompactEditField(
                   'First Name',
                   _editEmployeeFirstNameCtrl,
@@ -8538,6 +11036,11 @@ class _HomePageState extends State<HomePage> {
                   'Employee Email',
                   _editEmployeeEmailCtrl,
                   keyboardType: TextInputType.emailAddress,
+                ),
+                _buildCompactEditField(
+                  'Phone Number',
+                  _editEmployeePhoneCtrl,
+                  keyboardType: TextInputType.phone,
                 ),
                 _buildCompactEditField(
                   'Login Username',
@@ -8555,6 +11058,10 @@ class _HomePageState extends State<HomePage> {
                 _buildCompactEditField(
                   'Designation',
                   _editEmployeeDesignationCtrl,
+                ),
+                _buildEmployeePhotoCapturePanel(
+                  photo: _editEmployeeProfilePhotoBiometric,
+                  onCapture: () => _captureEmployeeProfilePhoto(isEdit: true),
                 ),
               ],
             ),
@@ -8578,16 +11085,33 @@ class _HomePageState extends State<HomePage> {
               style: TextStyle(color: Colors.grey[700]),
             ),
             const SizedBox(height: 16),
-            ElevatedButton.icon(
-              onPressed: _isEmployeeSaving ? null : _updateEmployeeDetails,
-              icon: _isEmployeeSaving
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.save),
-              label: const Text('Update Employee'),
+            Wrap(
+              spacing: 12,
+              runSpacing: 10,
+              children: [
+                ElevatedButton.icon(
+                  onPressed: _isEmployeeSaving ? null : _updateEmployeeDetails,
+                  icon: _isEmployeeSaving
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.save),
+                  label: const Text('Update Employee'),
+                ),
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.red,
+                    side: const BorderSide(color: Colors.red),
+                  ),
+                  onPressed: _isEmployeeSaving
+                      ? null
+                      : () => _confirmDeleteEmployee(employee),
+                  icon: const Icon(Icons.delete_outline),
+                  label: const Text('Delete Employee'),
+                ),
+              ],
             ),
           ],
         ),
@@ -8602,7 +11126,7 @@ class _HomePageState extends State<HomePage> {
     bool obscureText = false,
   }) {
     return SizedBox(
-      width: 290,
+      width: 246,
       child: TextField(
         controller: controller,
         keyboardType: keyboardType,
@@ -8612,10 +11136,110 @@ class _HomePageState extends State<HomePage> {
           border: const OutlineInputBorder(),
           isDense: true,
           contentPadding: const EdgeInsets.symmetric(
-            horizontal: 14,
-            vertical: 13,
+            horizontal: 12,
+            vertical: 10,
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildEmployeePhotoCapturePanel({
+    required String? photo,
+    required VoidCallback onCapture,
+  }) {
+    return SizedBox(
+      width: 246,
+      child: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFCFCFD),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: Colors.grey[300]!),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Employee Verification Photo',
+              style: TextStyle(
+                color: Color(0xFF1F2E5A),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 10),
+            if (photo?.isNotEmpty == true)
+              _buildPhotoBiometricPreview(
+                'Captured employee photo',
+                photo!,
+                compact: true,
+              )
+            else
+              Text(
+                'Capture photo before saving employee.',
+                style: TextStyle(color: Colors.grey[700]),
+              ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: onCapture,
+              icon: const Icon(Icons.camera_alt),
+              label: Text(
+                photo?.isNotEmpty == true ? 'Recapture Photo' : 'Take Photo',
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPhotoBiometricPreview(
+    String title,
+    String photo, {
+    String? message,
+    bool compact = false,
+  }) {
+    return Container(
+      width: compact ? double.infinity : 360,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.grey[200]!),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Image.network(
+              photo,
+              width: compact ? 74 : 92,
+              height: compact ? 58 : 72,
+              fit: BoxFit.cover,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: Color(0xFF1F2E5A),
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                if (message != null && message.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(message, style: TextStyle(color: Colors.grey[700])),
+                ],
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -8742,7 +11366,8 @@ class _HomePageState extends State<HomePage> {
                     minLines: 2,
                     maxLines: 3,
                     decoration: const InputDecoration(
-                      labelText: 'Assigned Work Address',
+                      labelText: 'Assigned Work Address / Particular Address',
+                      hintText: 'Enter the complete address or landmark',
                       border: OutlineInputBorder(),
                       isDense: true,
                     ),
@@ -8750,8 +11375,11 @@ class _HomePageState extends State<HomePage> {
                   const SizedBox(height: 14),
                   TextField(
                     controller: _locationMapLinkCtrl,
+                    minLines: 1,
+                    maxLines: 2,
                     decoration: const InputDecoration(
-                      labelText: 'Google Maps Link',
+                      labelText: 'Map Link or Extra Address (Optional)',
+                      hintText: 'Paste a map URL, or type a nearby landmark',
                       border: OutlineInputBorder(),
                       isDense: true,
                     ),
@@ -8766,6 +11394,12 @@ class _HomePageState extends State<HomePage> {
                       isDense: true,
                     ),
                   ),
+                  const SizedBox(height: 14),
+                  _buildLocationEffectiveDateFields(),
+                  if (!isAdd) ...[
+                    const SizedBox(height: 14),
+                    _buildLocationDateField(),
+                  ],
                   const SizedBox(height: 18),
                   Row(
                     children: [
@@ -8813,11 +11447,33 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildLocationAssignmentsTable() {
-    if (_adminEmployees.isEmpty) {
+    final selectedDateKey = _dateKey(_selectedLocationDate);
+    final rows = _adminEmployeeMaps().where((employee) {
+      if (selectedDateKey == null) return true;
+      final location = employee['assigned_location'] as Map<String, dynamic>?;
+      if (location == null) return false;
+      final selectedDate = _selectedLocationDate!;
+      final startsAt = DateTime.tryParse(
+        location['effective_from']?.toString() ?? '',
+      );
+      final endsAt = DateTime.tryParse(
+        location['effective_to']?.toString() ?? '',
+      );
+      final startsOk =
+          startsAt == null ||
+          !_dateOnly(selectedDate).isBefore(_dateOnly(startsAt));
+      final endsOk =
+          endsAt == null || !_dateOnly(selectedDate).isAfter(_dateOnly(endsAt));
+      return startsOk && endsOk;
+    }).toList();
+
+    if (rows.isEmpty) {
       return _buildReportMessage(
         icon: Icons.location_off,
         title: 'No employee locations',
-        message: 'Employee locations will appear here after assignment.',
+        message: _selectedLocationDate == null
+            ? 'Employee locations will appear here after assignment.'
+            : 'No employee locations match the selected date.',
       );
     }
 
@@ -8830,30 +11486,42 @@ class _HomePageState extends State<HomePage> {
         scrollDirection: Axis.horizontal,
         child: DataTable(
           columns: const [
-            DataColumn(label: Text('Employee')),
-            DataColumn(label: Text('Assigned Address')),
+            DataColumn(label: Text('Start Date')),
+            DataColumn(label: Text('End Date')),
+            DataColumn(label: Text('Updated')),
+            DataColumn(label: Text('Employee Name')),
+            DataColumn(label: Text('Employee Username')),
             DataColumn(label: Text('Radius')),
             DataColumn(label: Text('Status')),
             DataColumn(label: Text('Action')),
           ],
-          rows: _adminEmployees.whereType<Map<String, dynamic>>().map((
-            employee,
-          ) {
+          rows: rows.map((employee) {
             final location =
                 employee['assigned_location'] as Map<String, dynamic>?;
+            final updatedAt = location?['updated_at']?.toString() ?? '';
+            final effectiveFrom = location?['effective_from']?.toString() ?? '';
+            final effectiveTo = location?['effective_to']?.toString() ?? '';
             return DataRow(
               cells: [
-                DataCell(Text(employee['name']?.toString() ?? '-')),
                 DataCell(
-                  SizedBox(
-                    width: 320,
-                    child: Text(
-                      location?['address']?.toString() ?? 'Not assigned',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                  Text(
+                    effectiveFrom.isEmpty
+                        ? 'Immediate'
+                        : _readableDate(effectiveFrom),
                   ),
                 ),
+                DataCell(
+                  Text(
+                    effectiveTo.isEmpty
+                        ? 'Open ended'
+                        : _readableDate(effectiveTo),
+                  ),
+                ),
+                DataCell(
+                  Text(updatedAt.isEmpty ? '-' : _readableDate(updatedAt)),
+                ),
+                DataCell(Text(employee['name']?.toString() ?? '-')),
+                DataCell(Text(employee['username']?.toString() ?? '-')),
                 DataCell(
                   Text(
                     location == null ? '-' : '${location['radius_meters']}m',
@@ -8880,7 +11548,118 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  Widget _buildLocationDateField() {
+    return SizedBox(
+      width: 360,
+      child: Row(
+        children: [
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: () async {
+                final picked = await showDatePicker(
+                  context: context,
+                  initialDate: _selectedLocationDate ?? DateTime.now(),
+                  firstDate: DateTime(2020),
+                  lastDate: DateTime(DateTime.now().year + 2),
+                );
+                if (picked != null) {
+                  setState(() => _selectedLocationDate = picked);
+                }
+              },
+              icon: const Icon(Icons.calendar_today),
+              label: Text(
+                _selectedLocationDate == null
+                    ? 'All Dates'
+                    : _readableDate(_selectedLocationDate!.toIso8601String()),
+              ),
+            ),
+          ),
+          if (_selectedLocationDate != null) ...[
+            const SizedBox(width: 8),
+            IconButton(
+              tooltip: 'Clear date',
+              onPressed: () => setState(() => _selectedLocationDate = null),
+              icon: const Icon(Icons.close),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLocationEffectiveDateFields() {
+    return Wrap(
+      spacing: 12,
+      runSpacing: 12,
+      children: [
+        _buildLocationEffectiveDateButton(
+          label: 'Start Date',
+          value: _locationEffectiveFrom,
+          emptyLabel: 'Immediate',
+          onPick: (date) => setState(() => _locationEffectiveFrom = date),
+          onClear: () => setState(() => _locationEffectiveFrom = null),
+        ),
+        _buildLocationEffectiveDateButton(
+          label: 'End Date',
+          value: _locationEffectiveTo,
+          emptyLabel: 'Open ended',
+          onPick: (date) => setState(() => _locationEffectiveTo = date),
+          onClear: () => setState(() => _locationEffectiveTo = null),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLocationEffectiveDateButton({
+    required String label,
+    required DateTime? value,
+    required String emptyLabel,
+    required ValueChanged<DateTime> onPick,
+    required VoidCallback onClear,
+  }) {
+    return SizedBox(
+      width: 260,
+      child: Row(
+        children: [
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: () async {
+                final picked = await showDatePicker(
+                  context: context,
+                  initialDate: value ?? DateTime.now(),
+                  firstDate: DateTime(2020),
+                  lastDate: DateTime(DateTime.now().year + 3),
+                );
+                if (picked != null) onPick(picked);
+              },
+              icon: const Icon(Icons.event_available),
+              label: Text(
+                value == null
+                    ? '$label: $emptyLabel'
+                    : '$label: ${_readableDate(value.toIso8601String())}',
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ),
+          if (value != null) ...[
+            const SizedBox(width: 6),
+            IconButton(
+              tooltip: 'Clear $label',
+              onPressed: onClear,
+              icon: const Icon(Icons.close),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   Widget _buildAdminAttendanceView() {
+    final selectedDetail = _selectedAdminAttendanceDetail;
+    if (selectedDetail != null) {
+      return _buildAdminAttendanceDetailsDashboard(selectedDetail);
+    }
+
     final isDailyAttendances =
         _selectedAdminAttendanceSection == 'Daily Attendances' ||
         _selectedAttendanceSection == 'Daily Attendance';
@@ -9138,18 +11917,46 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _showAdminAttendanceDetails(Map<String, dynamic> row) {
+    setState(() => _selectedAdminAttendanceDetail = row);
+  }
+
+  Widget _buildAdminAttendanceDetailsDashboard(Map<String, dynamic> row) {
     final location = row['assigned_location'] as Map<String, dynamic>?;
-    showDialog<void>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: Text(row['employee']?.toString() ?? 'Attendance details'),
-          content: SizedBox(
-            width: 620,
-            child: SingleChildScrollView(
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(32),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              IconButton(
+                tooltip: 'Back',
+                onPressed: () =>
+                    setState(() => _selectedAdminAttendanceDetail = null),
+                icon: const Icon(Icons.arrow_back),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildSectionHeader(
+                  row['employee']?.toString() ?? 'Attendance Details',
+                  'Review attendance time, location, radius, and map details.',
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 820),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey[200]!),
+              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
                 children: [
                   _buildAttendanceDetailRow(
                     'Date',
@@ -9163,7 +11970,7 @@ class _HomePageState extends State<HomePage> {
                     'Status',
                     row['status']?.toString() ?? '-',
                   ),
-                  const Divider(height: 26),
+                  const Divider(height: 28),
                   _buildAttendanceDetailRow(
                     'Assigned location',
                     location?['address']?.toString() ?? 'No location assigned',
@@ -9172,7 +11979,7 @@ class _HomePageState extends State<HomePage> {
                     'Allowed radius',
                     location == null ? '-' : '${location['radius_meters']}m',
                   ),
-                  const Divider(height: 26),
+                  const Divider(height: 28),
                   _buildAttendanceDetailRow(
                     'Check-in time',
                     row['check_in']?.toString() ?? '-',
@@ -9191,7 +11998,12 @@ class _HomePageState extends State<HomePage> {
                     'Open check-in map',
                     row['check_in_map_url']?.toString() ?? '',
                   ),
-                  const Divider(height: 26),
+                  _buildAttendanceBiometricPreview(
+                    'Check-in biometric',
+                    row['check_in_photo_biometric']?.toString() ?? '',
+                    row['check_in_biometric_details'],
+                  ),
+                  const Divider(height: 28),
                   _buildAttendanceDetailRow(
                     'Check-out time',
                     row['check_out']?.toString() ?? '-',
@@ -9210,18 +12022,17 @@ class _HomePageState extends State<HomePage> {
                     'Open check-out map',
                     row['check_out_map_url']?.toString() ?? '',
                   ),
+                  _buildAttendanceBiometricPreview(
+                    'Check-out biometric',
+                    row['check_out_photo_biometric']?.toString() ?? '',
+                    row['check_out_biometric_details'],
+                  ),
                 ],
               ),
             ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Close'),
-            ),
-          ],
-        );
-      },
+        ],
+      ),
     );
   }
 
@@ -9259,6 +12070,65 @@ class _HomePageState extends State<HomePage> {
         onPressed: url.isEmpty ? null : () => openExternalLink(url),
         icon: const Icon(Icons.map_outlined),
         label: Text(label),
+      ),
+    );
+  }
+
+  Widget _buildAttendanceBiometricPreview(
+    String label,
+    String photo,
+    dynamic details,
+  ) {
+    final detailMap = details is Map<String, dynamic> ? details : {};
+    final verified = detailMap['verified'] == true;
+    final sizeBytes = detailMap['size_bytes'];
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 140,
+            child: Text(
+              label,
+              style: TextStyle(
+                color: Colors.grey[700],
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          Expanded(
+            child: photo.isEmpty
+                ? const Text('-', style: TextStyle(color: Color(0xFF1F2E5A)))
+                : Wrap(
+                    spacing: 12,
+                    runSpacing: 10,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.network(
+                          photo,
+                          width: 110,
+                          height: 82,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                      _buildStatusPill(
+                        verified ? 'Biometric Verified' : 'Not Verified',
+                        color: verified
+                            ? const Color(0xFF1ABE8E)
+                            : Colors.orange,
+                      ),
+                      if (sizeBytes != null)
+                        Text(
+                          '$sizeBytes bytes',
+                          style: TextStyle(color: Colors.grey[700]),
+                        ),
+                    ],
+                  ),
+          ),
+        ],
       ),
     );
   }
@@ -9753,150 +12623,100 @@ class _HomePageState extends State<HomePage> {
           const SizedBox(height: 20),
 
           ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 620),
-            child: Column(
-              children: [
-                TextField(
-                  controller: _employeeFirstNameCtrl,
-                  textInputAction: TextInputAction.next,
-                  decoration: const InputDecoration(
-                    labelText: 'First Name',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 13,
+            constraints: const BoxConstraints(maxWidth: 800),
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey[200]!),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: [
+                      _buildCompactEditField(
+                        'Display Name',
+                        _employeeDisplayNameCtrl,
+                      ),
+                      _buildCompactEditField(
+                        'First Name',
+                        _employeeFirstNameCtrl,
+                      ),
+                      _buildCompactEditField(
+                        'Last Name',
+                        _employeeLastNameCtrl,
+                      ),
+                      _buildCompactEditField(
+                        'Date of Birth (YYYY-MM-DD)',
+                        _employeeDobCtrl,
+                        keyboardType: TextInputType.datetime,
+                      ),
+                      _buildCompactEditField(
+                        'Employee Email',
+                        _employeeEmailCtrl,
+                        keyboardType: TextInputType.emailAddress,
+                      ),
+                      _buildCompactEditField(
+                        'Phone Number',
+                        _employeePhoneCtrl,
+                        keyboardType: TextInputType.phone,
+                      ),
+                      _buildCompactEditField(
+                        'Login Username',
+                        _employeeUsernameCtrl,
+                      ),
+                      _buildCompactEditField(
+                        'Login Password',
+                        _employeePasswordCtrl,
+                        obscureText: true,
+                      ),
+                      _buildCompactEditField(
+                        'Department',
+                        _employeeDepartmentCtrl,
+                      ),
+                      _buildCompactEditField(
+                        'Designation',
+                        _employeeDesignationCtrl,
+                      ),
+                      _buildEmployeePhotoCapturePanel(
+                        photo: _employeeProfilePhotoBiometric,
+                        onCapture: _captureEmployeeProfilePhoto,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 18),
+                  _buildDashboardPermissionBoxes(
+                    canUser: _employeeCanAccessUser,
+                    canAdmin: _employeeCanAccessAdmin,
+                    canHr: _employeeCanAccessHr,
+                    onUserChanged: (value) =>
+                        setState(() => _employeeCanAccessUser = value ?? false),
+                    onAdminChanged: (value) => setState(
+                      () => _employeeCanAccessAdmin = value ?? false,
+                    ),
+                    onHrChanged: (value) =>
+                        setState(() => _employeeCanAccessHr = value ?? false),
+                  ),
+                  const SizedBox(height: 18),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: ElevatedButton(
+                      onPressed: _isEmployeeSaving ? null : _registerEmployee,
+                      child: _isEmployeeSaving
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text('Register Employee'),
                     ),
                   ),
-                ),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: _employeeLastNameCtrl,
-                  textInputAction: TextInputAction.next,
-                  decoration: const InputDecoration(
-                    labelText: 'Last Name',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 13,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: _employeeDobCtrl,
-                  keyboardType: TextInputType.datetime,
-                  textInputAction: TextInputAction.next,
-                  decoration: const InputDecoration(
-                    labelText: 'Date of Birth (YYYY-MM-DD)',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 13,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: _employeeEmailCtrl,
-                  keyboardType: TextInputType.emailAddress,
-                  textInputAction: TextInputAction.next,
-                  decoration: const InputDecoration(
-                    labelText: 'Employee Email',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 13,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: _employeeUsernameCtrl,
-                  textInputAction: TextInputAction.next,
-                  decoration: const InputDecoration(
-                    labelText: 'Login Username',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 13,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: _employeePasswordCtrl,
-                  obscureText: true,
-                  textInputAction: TextInputAction.next,
-                  decoration: const InputDecoration(
-                    labelText: 'Login Password',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 13,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: _employeeDepartmentCtrl,
-                  textInputAction: TextInputAction.next,
-                  decoration: const InputDecoration(
-                    labelText: 'Department',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 13,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: _employeeDesignationCtrl,
-                  textInputAction: TextInputAction.done,
-                  decoration: const InputDecoration(
-                    labelText: 'Designation',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 13,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 18),
-                _buildDashboardPermissionBoxes(
-                  canUser: _employeeCanAccessUser,
-                  canAdmin: _employeeCanAccessAdmin,
-                  canHr: _employeeCanAccessHr,
-                  onUserChanged: (value) =>
-                      setState(() => _employeeCanAccessUser = value ?? false),
-                  onAdminChanged: (value) =>
-                      setState(() => _employeeCanAccessAdmin = value ?? false),
-                  onHrChanged: (value) =>
-                      setState(() => _employeeCanAccessHr = value ?? false),
-                ),
-                const SizedBox(height: 18),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: ElevatedButton(
-                    onPressed: _isEmployeeSaving ? null : _registerEmployee,
-                    child: _isEmployeeSaving
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text('Register Employee'),
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ],
@@ -10362,18 +13182,28 @@ class _HomePageState extends State<HomePage> {
       padding: const EdgeInsets.all(28),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey[200]!),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _lineColor),
+        boxShadow: _softShadow(0.04),
       ),
       child: Column(
         children: [
-          Icon(icon, size: 40, color: Colors.grey[500]),
-          const SizedBox(height: 12),
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              color: _brandBlue.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Icon(icon, size: 30, color: _brandBlue),
+          ),
+          const SizedBox(height: 14),
           Text(
             title,
-            style: Theme.of(
-              context,
-            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              color: _inkBlue,
+              fontWeight: FontWeight.w800,
+            ),
           ),
           const SizedBox(height: 8),
           Text(
@@ -10381,7 +13211,7 @@ class _HomePageState extends State<HomePage> {
             textAlign: TextAlign.center,
             style: Theme.of(
               context,
-            ).textTheme.bodyMedium?.copyWith(color: Colors.grey[600]),
+            ).textTheme.bodyMedium?.copyWith(color: const Color(0xFF64748B)),
           ),
           if (actionLabel != null && onAction != null) ...[
             const SizedBox(height: 16),
@@ -10394,15 +13224,47 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildMenuItem(String label, IconData icon, String menuKey) {
     bool isActive = _selectedMenu == menuKey;
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOut,
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
       decoration: BoxDecoration(
-        color: isActive ? const Color(0xFF1ABE8E) : Colors.transparent,
-        borderRadius: BorderRadius.circular(8),
+        color: isActive
+            ? Colors.white.withValues(alpha: 0.14)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isActive
+              ? Colors.white.withValues(alpha: 0.18)
+              : Colors.transparent,
+        ),
       ),
       child: ListTile(
-        leading: Icon(icon, color: Colors.white),
-        title: Text(label, style: const TextStyle(color: Colors.white)),
+        dense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+        leading: Container(
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(
+            color: isActive
+                ? _brandTeal.withValues(alpha: 0.22)
+                : Colors.white.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(
+            icon,
+            color: isActive ? const Color(0xFF6EE7B7) : Colors.white,
+            size: 19,
+          ),
+        ),
+        title: Text(
+          label,
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: isActive ? FontWeight.w800 : FontWeight.w600,
+            fontSize: 14,
+          ),
+        ),
         onTap: () => _selectMenu(menuKey),
       ),
     );
@@ -10410,25 +13272,28 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildSubMenuItem(String label, bool isActive, VoidCallback onTap) {
     return Container(
-      margin: const EdgeInsets.only(left: 36, right: 8, top: 2, bottom: 2),
+      margin: const EdgeInsets.only(left: 48, right: 12, top: 2, bottom: 2),
       decoration: BoxDecoration(
         color: isActive
-            ? Colors.white.withValues(alpha: 0.12)
+            ? _brandTeal.withValues(alpha: 0.16)
             : Colors.transparent,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(12),
       ),
       child: ListTile(
         dense: true,
+        visualDensity: VisualDensity.compact,
         minLeadingWidth: 8,
         leading: Icon(
           Icons.circle,
           size: 8,
-          color: isActive ? const Color(0xFF1ABE8E) : Colors.white70,
+          color: isActive ? const Color(0xFF6EE7B7) : Colors.white54,
         ),
         title: Text(
           label,
           style: TextStyle(
-            color: isActive ? Colors.white : Colors.white70,
+            color: isActive
+                ? Colors.white
+                : Colors.white.withValues(alpha: 0.7),
             fontWeight: isActive ? FontWeight.w700 : FontWeight.w400,
             fontSize: 13,
           ),
@@ -10443,8 +13308,10 @@ class _HomePageState extends State<HomePage> {
       padding: const EdgeInsets.all(16),
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: Colors.grey[100],
-        borderRadius: BorderRadius.circular(8),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _lineColor),
+        boxShadow: _softShadow(0.04),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -10457,9 +13324,10 @@ class _HomePageState extends State<HomePage> {
           ),
           Text(
             date,
-            style: Theme.of(
-              context,
-            ).textTheme.bodyMedium?.copyWith(color: Colors.grey[600]),
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: const Color(0xFF64748B),
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ],
       ),
@@ -10473,29 +13341,39 @@ class _HomePageState extends State<HomePage> {
     Color color,
   ) {
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[200]!),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _lineColor),
+        boxShadow: _softShadow(0.05),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 32, color: color),
+          Container(
+            width: 46,
+            height: 46,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(icon, size: 25, color: color),
+          ),
           const SizedBox(height: 16),
           Text(
             title,
-            style: Theme.of(
-              context,
-            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              color: _inkBlue,
+              fontWeight: FontWeight.w800,
+            ),
           ),
           const SizedBox(height: 8),
           Text(
             subtitle,
             style: Theme.of(
               context,
-            ).textTheme.bodySmall?.copyWith(color: Colors.grey[600]),
+            ).textTheme.bodySmall?.copyWith(color: const Color(0xFF64748B)),
           ),
         ],
       ),

@@ -15,6 +15,7 @@ class UserProfile(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     employee_code = models.CharField(max_length=30, blank=True)
     mobile_number = models.CharField(max_length=20, blank=True)
+    profile_photo_biometric = models.TextField(blank=True)
     gender = models.CharField(max_length=16, choices=GENDER_CHOICES, blank=True)
     date_of_birth = models.DateField(null=True, blank=True)
     department = models.CharField(max_length=80, blank=True)
@@ -40,6 +41,8 @@ class AssignedLocation(models.Model):
     longitude = models.DecimalField(max_digits=9, decimal_places=6, default=0)
     coordinates_resolved = models.BooleanField(default=False)
     radius_meters = models.PositiveIntegerField(default=DEFAULT_ATTENDANCE_RADIUS_METERS)
+    effective_from = models.DateField(null=True, blank=True)
+    effective_to = models.DateField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -88,6 +91,7 @@ class Attendance(models.Model):
     latitude = models.DecimalField(max_digits=9, decimal_places=6)
     longitude = models.DecimalField(max_digits=9, decimal_places=6)
     accuracy = models.FloatField(null=True, blank=True)
+    photo_biometric = models.TextField(blank=True)
     timestamp = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -224,6 +228,25 @@ class SalaryRecord(models.Model):
 
     def __str__(self):
         return f'{self.employee.username} {self.month:02d}/{self.year}'
+
+
+class ReimbursementRequest(models.Model):
+    employee = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='reimbursement_requests',
+    )
+    expense_date = models.DateField()
+    reason = models.TextField()
+    file_name = models.CharField(max_length=255)
+    pdf_data = models.TextField()
+    submitted_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-expense_date', '-submitted_at']
+
+    def __str__(self):
+        return f'{self.employee.username} reimbursement {self.expense_date}'
 
 
 class HelpdeskTicket(models.Model):

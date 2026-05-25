@@ -20,18 +20,58 @@ from .models import (
     Holiday,
     LeaveRequest,
     PasswordResetOTP,
+    ReimbursementRequest,
     SalaryRecord,
     UserProfile,
 )
+from .password_rules import validate_password_rules
 
 
 User = get_user_model()
 
 
+def biometric_image_preview(value, width=120, height=90):
+    if not value:
+        return '-'
+    return format_html(
+        '<img src="{}" style="width:{}px;height:{}px;object-fit:cover;border-radius:8px;border:1px solid #d1d5db" />',
+        value,
+        width,
+        height,
+    )
+
+
+class PhotoBiometricCaptureWidget(forms.Textarea):
+    class Media:
+        js = ('people/admin_photo_capture.js',)
+
+    def __init__(self, attrs=None):
+        default_attrs = {
+            'class': 'healon-photo-capture',
+            'rows': 3,
+        }
+        if attrs:
+            default_attrs.update(attrs)
+        super().__init__(default_attrs)
+
+
 class HealOnUserCreationForm(UserCreationForm):
-    first_name = forms.CharField(max_length=150)
-    last_name = forms.CharField(max_length=150)
+    display_name = forms.CharField(max_length=300)
+    first_name = forms.CharField(max_length=150, required=False)
+    last_name = forms.CharField(max_length=150, required=False)
     email = forms.EmailField()
+    employee_code = forms.CharField(max_length=30, required=False)
+    mobile_number = forms.CharField(max_length=20, required=False)
+    profile_photo_biometric = forms.CharField(
+        label='Employee verification photo',
+        required=True,
+        widget=PhotoBiometricCaptureWidget(),
+        help_text='Required for check-in/check-out photo verification. Capture the employee photo before saving.',
+    )
+    gender = forms.ChoiceField(
+        choices=(('', '---------'), *UserProfile.GENDER_CHOICES),
+        required=False,
+    )
     date_of_birth = forms.DateField(required=False, widget=forms.DateInput(attrs={'type': 'date'}))
     department = forms.CharField(max_length=80, required=False)
     designation = forms.CharField(max_length=80, required=False)
@@ -43,9 +83,14 @@ class HealOnUserCreationForm(UserCreationForm):
         model = User
         fields = (
             'username',
+            'display_name',
             'first_name',
             'last_name',
             'email',
+            'employee_code',
+            'mobile_number',
+            'profile_photo_biometric',
+            'gender',
             'date_of_birth',
             'password1',
             'password2',
@@ -56,10 +101,30 @@ class HealOnUserCreationForm(UserCreationForm):
             'can_access_hr_dashboard',
         )
 
+    def clean_password2(self):
+        password = self.cleaned_data.get('password2')
+        validate_password_rules(password)
+        return password
+
+    def clean_profile_photo_biometric(self):
+        value = (self.cleaned_data.get('profile_photo_biometric') or '').strip()
+        if not value.startswith('data:image/') or ',' not in value:
+            raise forms.ValidationError(
+                'Employee verification photo must be a captured image data URL.'
+            )
+        return value
+
     def save(self, commit=True):
         user = super().save(commit=False)
-        user.first_name = self.cleaned_data['first_name']
-        user.last_name = self.cleaned_data['last_name']
+        first_name = self.cleaned_data['first_name']
+        last_name = self.cleaned_data['last_name']
+        display_name = self.cleaned_data.get('display_name') or ''
+        if display_name and (not first_name or not last_name):
+            display_first_name, _, display_last_name = display_name.partition(' ')
+            first_name = first_name or display_first_name
+            last_name = last_name or display_last_name
+        user.first_name = first_name
+        user.last_name = last_name
         user.email = self.cleaned_data['email']
         user.is_staff = self.cleaned_data['can_access_admin_dashboard']
         if commit:
@@ -67,7 +132,10 @@ class HealOnUserCreationForm(UserCreationForm):
             UserProfile.objects.update_or_create(
                 user=user,
                 defaults={
-                    'employee_code': user.username.upper(),
+                    'employee_code': self.cleaned_data.get('employee_code') or user.username.upper(),
+                    'mobile_number': self.cleaned_data.get('mobile_number') or '',
+                    'profile_photo_biometric': self.cleaned_data.get('profile_photo_biometric') or '',
+                    'gender': self.cleaned_data.get('gender') or '',
                     'date_of_birth': self.cleaned_data.get('date_of_birth'),
                     'department': self.cleaned_data.get('department') or '',
                     'designation': self.cleaned_data.get('designation') or 'Employee',
@@ -83,6 +151,83 @@ class HealOnUserCreationForm(UserCreationForm):
                 },
             )
         return user
+
+
+class HealOnUserChangeForm(forms.ModelForm):
+    display_name = forms.CharField(max_length=300)
+    employee_code = forms.CharField(max_length=30, required=False)
+    mobile_number = forms.CharField(max_length=20, required=False)
+    profile_photo_biometric = forms.CharField(
+        label='Employee verification photo',
+        required=True,
+        widget=PhotoBiometricCaptureWidget(),
+        help_text='Required for check-in/check-out photo verification. Capture or recapture the employee photo before saving.',
+    )
+    gender = forms.ChoiceField(
+        choices=(('', '---------'), *UserProfile.GENDER_CHOICES),
+        required=False,
+    )
+    date_of_birth = forms.DateField(required=False, widget=forms.DateInput(attrs={'type': 'date'}))
+    department = forms.CharField(max_length=80, required=False)
+    designation = forms.CharField(max_length=80, required=False)
+    can_access_user_dashboard = forms.BooleanField(required=False, initial=True)
+    can_access_admin_dashboard = forms.BooleanField(required=False)
+    can_access_hr_dashboard = forms.BooleanField(required=False)
+
+    class Meta:
+        model = User
+        fields = (
+            'username',
+            'display_name',
+            'first_name',
+            'last_name',
+            'email',
+            'employee_code',
+            'mobile_number',
+            'profile_photo_biometric',
+            'gender',
+            'date_of_birth',
+            'department',
+            'designation',
+            'can_access_user_dashboard',
+            'can_access_admin_dashboard',
+            'can_access_hr_dashboard',
+        )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        profile = getattr(self.instance, 'userprofile', None)
+        if self.instance and self.instance.pk:
+            self.fields['display_name'].initial = self.instance.get_full_name() or self.instance.username
+        if profile:
+            self.fields['employee_code'].initial = profile.employee_code
+            self.fields['mobile_number'].initial = profile.mobile_number
+            self.fields['profile_photo_biometric'].initial = profile.profile_photo_biometric
+            self.fields['gender'].initial = profile.gender
+            self.fields['date_of_birth'].initial = profile.date_of_birth
+            self.fields['department'].initial = profile.department
+            self.fields['designation'].initial = profile.designation
+            self.fields['can_access_user_dashboard'].initial = profile.can_access_user_dashboard
+            self.fields['can_access_admin_dashboard'].initial = profile.can_access_admin_dashboard
+            self.fields['can_access_hr_dashboard'].initial = profile.can_access_hr_dashboard
+
+    def clean_profile_photo_biometric(self):
+        value = (self.cleaned_data.get('profile_photo_biometric') or '').strip()
+        if not value.startswith('data:image/') or ',' not in value:
+            raise forms.ValidationError(
+                'Employee verification photo must be a captured image data URL.'
+            )
+        return value
+
+    def clean(self):
+        cleaned_data = super().clean()
+        if not any([
+            cleaned_data.get('can_access_user_dashboard'),
+            cleaned_data.get('can_access_admin_dashboard'),
+            cleaned_data.get('can_access_hr_dashboard'),
+        ]):
+            raise forms.ValidationError('Select at least one dashboard permission.')
+        return cleaned_data
 
 
 def extract_coordinates_from_map_url(value):
@@ -268,6 +413,8 @@ class UserProfileInline(admin.StackedInline):
                 'fields': (
                     'employee_code',
                     'mobile_number',
+                    'profile_photo_preview',
+                    'profile_photo_biometric',
                     'gender',
                     'date_of_birth',
                     'department',
@@ -286,6 +433,14 @@ class UserProfileInline(admin.StackedInline):
             },
         ),
     )
+    readonly_fields = ('profile_photo_preview',)
+
+    def profile_photo_preview(self, obj):
+        return biometric_image_preview(
+            getattr(obj, 'profile_photo_biometric', ''),
+        )
+
+    profile_photo_preview.short_description = 'Verification photo'
 
 
 class AssignedLocationInline(admin.StackedInline):
@@ -298,6 +453,8 @@ class AssignedLocationInline(admin.StackedInline):
         'address',
         'map_location',
         'radius_meters',
+        'effective_from',
+        'effective_to',
         'is_active',
         'map_link',
         'directions_link',
@@ -338,11 +495,13 @@ class AssignedLocationAdmin(admin.ModelAdmin):
         'name',
         'address_preview',
         'restriction',
+        'effective_from',
+        'effective_to',
         'is_active',
         'map_status',
         'updated_at',
     )
-    list_filter = ('is_active', 'radius_meters', 'coordinates_resolved')
+    list_filter = ('is_active', 'radius_meters', 'coordinates_resolved', 'effective_from', 'effective_to')
     search_fields = (
         'user__username',
         'user__first_name',
@@ -357,6 +516,8 @@ class AssignedLocationAdmin(admin.ModelAdmin):
         'address',
         'map_location',
         'radius_meters',
+        'effective_from',
+        'effective_to',
         'is_active',
         'map_link',
         'directions_link',
@@ -413,6 +574,7 @@ class AttendanceInline(admin.TabularInline):
         'location_address',
         'distance_meters',
         'accuracy',
+        'photo_biometric_preview',
         'location_link',
     )
     readonly_fields = fields
@@ -440,33 +602,59 @@ class AttendanceInline(admin.TabularInline):
 
     location_link.short_description = 'Location'
 
+    def photo_biometric_preview(self, obj):
+        return biometric_image_preview(obj.photo_biometric, width=96, height=72)
+
+    photo_biometric_preview.short_description = 'Photo biometric'
+
 
 admin.site.unregister(User)
 
 
+USER_ADMIN_PROFILE_FIELDS = (
+    'username',
+    'display_name',
+    'first_name',
+    'last_name',
+    'email',
+    'employee_code',
+    'mobile_number',
+    'profile_photo_biometric',
+    'gender',
+    'date_of_birth',
+    'department',
+    'designation',
+    'can_access_user_dashboard',
+    'can_access_admin_dashboard',
+    'can_access_hr_dashboard',
+)
+
+
 @admin.register(User)
 class UserAdmin(DjangoUserAdmin):
+    form = HealOnUserChangeForm
     add_form = HealOnUserCreationForm
-    inlines = [UserProfileInline, AssignedLocationInline, AttendanceInline]
+    inlines = []
+    fieldsets = (
+        (
+            None,
+            {
+                'classes': ('wide',),
+                'fields': USER_ADMIN_PROFILE_FIELDS,
+            },
+        ),
+    )
     add_fieldsets = (
         (
             None,
             {
                 'classes': ('wide',),
-                'fields': (
-                    'username',
-                    'first_name',
-                    'last_name',
-                    'email',
-                    'date_of_birth',
+                'fields': USER_ADMIN_PROFILE_FIELDS[:10]
+                + (
                     'password1',
                     'password2',
-                    'department',
-                    'designation',
-                    'can_access_user_dashboard',
-                    'can_access_admin_dashboard',
-                    'can_access_hr_dashboard',
-                ),
+                )
+                + USER_ADMIN_PROFILE_FIELDS[10:],
             },
         ),
     )
@@ -508,16 +696,44 @@ class UserAdmin(DjangoUserAdmin):
         profile = getattr(obj, 'userprofile', None)
         return profile.designation if profile else ''
 
-    def save_related(self, request, form, formsets, change):
-        super().save_related(request, form, formsets, change)
-        profile = getattr(form.instance, 'userprofile', None)
-        if (
-            profile
-            and not form.instance.is_superuser
-            and form.instance.is_staff != profile.can_access_admin_dashboard
-        ):
-            form.instance.is_staff = profile.can_access_admin_dashboard
-            form.instance.save(update_fields=['is_staff'])
+    def save_model(self, request, obj, form, change):
+        if change and hasattr(form, 'cleaned_data'):
+            display_name = form.cleaned_data.get('display_name') or ''
+            first_name = form.cleaned_data.get('first_name') or ''
+            last_name = form.cleaned_data.get('last_name') or ''
+            if display_name and (not first_name or not last_name):
+                display_first_name, _, display_last_name = display_name.partition(' ')
+                first_name = first_name or display_first_name
+                last_name = last_name or display_last_name
+            obj.first_name = first_name
+            obj.last_name = last_name
+            obj.is_staff = bool(form.cleaned_data.get('can_access_admin_dashboard'))
+        super().save_model(request, obj, form, change)
+        if change and hasattr(form, 'cleaned_data'):
+            UserProfile.objects.update_or_create(
+                user=obj,
+                defaults={
+                    'employee_code': form.cleaned_data.get('employee_code') or obj.username.upper(),
+                    'mobile_number': form.cleaned_data.get('mobile_number') or '',
+                    'profile_photo_biometric': form.cleaned_data.get('profile_photo_biometric') or '',
+                    'gender': form.cleaned_data.get('gender') or '',
+                    'date_of_birth': form.cleaned_data.get('date_of_birth'),
+                    'department': form.cleaned_data.get('department') or '',
+                    'designation': form.cleaned_data.get('designation') or 'Employee',
+                    'can_access_user_dashboard': form.cleaned_data.get(
+                        'can_access_user_dashboard',
+                        True,
+                    ),
+                    'can_access_admin_dashboard': form.cleaned_data.get(
+                        'can_access_admin_dashboard',
+                        False,
+                    ),
+                    'can_access_hr_dashboard': form.cleaned_data.get(
+                        'can_access_hr_dashboard',
+                        False,
+                    ),
+                },
+            )
 
     def dashboard_permissions(self, obj):
         profile = getattr(obj, 'userprofile', None)
@@ -562,6 +778,7 @@ class UserProfileAdmin(admin.ModelAdmin):
         'designation',
         'date_of_birth',
         'mobile_number',
+        'profile_photo_preview',
         'gender',
         'can_access_user_dashboard',
         'can_access_admin_dashboard',
@@ -585,6 +802,12 @@ class UserProfileAdmin(admin.ModelAdmin):
         'designation',
         'mobile_number',
     )
+    readonly_fields = ('profile_photo_preview',)
+
+    def profile_photo_preview(self, obj):
+        return biometric_image_preview(obj.profile_photo_biometric)
+
+    profile_photo_preview.short_description = 'Verification photo'
 
 
 @admin.register(Attendance)
@@ -596,6 +819,7 @@ class AttendanceAdmin(admin.ModelAdmin):
         'location_address',
         'distance_label',
         'accuracy',
+        'photo_biometric_preview',
     )
     list_filter = ('event_type', 'timestamp', 'user', 'assigned_location')
     search_fields = (
@@ -616,6 +840,8 @@ class AttendanceAdmin(admin.ModelAdmin):
         'accuracy',
         'timestamp',
         'location_link',
+        'photo_biometric_preview',
+        'photo_biometric',
     )
 
     def event_badge(self, obj):
@@ -639,6 +865,11 @@ class AttendanceAdmin(admin.ModelAdmin):
             obj.latitude,
             obj.longitude,
         )
+
+    def photo_biometric_preview(self, obj):
+        return biometric_image_preview(obj.photo_biometric)
+
+    photo_biometric_preview.short_description = 'Photo biometric'
 
 
 @admin.register(AttendanceRegularization)
@@ -698,6 +929,31 @@ class SalaryRecordAdmin(admin.ModelAdmin):
     list_display = ('employee', 'month', 'year', 'gross_salary', 'net_salary', 'is_published')
     list_filter = ('is_published', 'year', 'month')
     search_fields = ('employee__username', 'employee__first_name', 'employee__last_name')
+
+
+@admin.register(ReimbursementRequest)
+class ReimbursementRequestAdmin(admin.ModelAdmin):
+    list_display = ('employee', 'expense_date', 'file_name', 'submitted_at')
+    list_filter = ('expense_date', 'submitted_at')
+    search_fields = (
+        'employee__username',
+        'employee__first_name',
+        'employee__last_name',
+        'reason',
+        'file_name',
+    )
+    readonly_fields = ('submitted_at', 'pdf_link')
+    fields = ('employee', 'expense_date', 'reason', 'file_name', 'pdf_link', 'submitted_at')
+
+    def pdf_link(self, obj):
+        if not obj or not obj.pdf_data:
+            return '-'
+        return format_html(
+            '<a href="{}" target="_blank" rel="noopener">Open uploaded PDF</a>',
+            obj.pdf_data,
+        )
+
+    pdf_link.short_description = 'PDF'
 
 
 @admin.register(HelpdeskTicket)
