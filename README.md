@@ -7,17 +7,21 @@ HealOn also supports future enhancements such as biometric verification, face re
  
   user dashboard :                  
   User name -vamshi
+  
   password - vamshi@123
   
   admin dashboard :
   Username-admin
+  
   Password- Admin@123
  
   
   Hr dashboard 
   Username- hr
+  
   password-HR@123
 
  Backend Admin Dashboard;
  Username -admin
+ 
  Password-Admin@123
