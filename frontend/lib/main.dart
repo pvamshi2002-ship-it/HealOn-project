@@ -75,6 +75,383 @@ class AttendanceReport {
   }
 }
 
+class _HrActivityRow {
+  const _HrActivityRow({
+    required this.employee,
+    required this.action,
+    required this.time,
+    required this.status,
+    required this.color,
+  });
+
+  final String employee;
+  final String action;
+  final String time;
+  final String status;
+  final Color color;
+}
+
+class _HrLeaveRow {
+  const _HrLeaveRow({
+    required this.employee,
+    required this.type,
+    required this.duration,
+  });
+
+  final String employee;
+  final String type;
+  final String duration;
+}
+
+class _HrSparklinePainter extends CustomPainter {
+  const _HrSparklinePainter({
+    required this.values,
+    required this.color,
+    this.fill = true,
+  });
+
+  final List<double> values;
+  final Color color;
+  final bool fill;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (values.length < 2 || size.width <= 0 || size.height <= 0) return;
+    final minValue = values.reduce((a, b) => a < b ? a : b);
+    final maxValue = values.reduce((a, b) => a > b ? a : b);
+    final range = maxValue == minValue ? 1.0 : maxValue - minValue;
+    final points = <Offset>[];
+    for (var i = 0; i < values.length; i++) {
+      final x = size.width * i / (values.length - 1);
+      final normalized = (values[i] - minValue) / range;
+      final y = size.height - (normalized * (size.height - 4)) - 2;
+      points.add(Offset(x, y));
+    }
+
+    final path = Path()..moveTo(points.first.dx, points.first.dy);
+    for (var i = 1; i < points.length; i++) {
+      final previous = points[i - 1];
+      final point = points[i];
+      final controlX = (previous.dx + point.dx) / 2;
+      path.cubicTo(
+        controlX,
+        previous.dy,
+        controlX,
+        point.dy,
+        point.dx,
+        point.dy,
+      );
+    }
+
+    if (fill) {
+      final fillPath = Path.from(path)
+        ..lineTo(size.width, size.height)
+        ..lineTo(0, size.height)
+        ..close();
+      canvas.drawPath(
+        fillPath,
+        Paint()
+          ..shader = LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [color.withValues(alpha: 0.18), color.withValues(alpha: 0)],
+          ).createShader(Offset.zero & size),
+      );
+    }
+
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = color
+        ..strokeWidth = 2
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _HrSparklinePainter oldDelegate) {
+    return oldDelegate.values != values ||
+        oldDelegate.color != color ||
+        oldDelegate.fill != fill;
+  }
+}
+
+class _HrAttendanceChartPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final gridPaint = Paint()
+      ..color = const Color(0xFFE2E8F0)
+      ..strokeWidth = 1;
+    final labelPaint = TextPainter(
+      textDirection: TextDirection.ltr,
+      textAlign: TextAlign.center,
+    );
+    const leftPad = 30.0;
+    const bottomPad = 24.0;
+    final chartSize = Size(
+      size.width - leftPad - 8,
+      size.height - bottomPad - 8,
+    );
+    final origin = Offset(leftPad, 8);
+
+    for (var i = 0; i <= 4; i++) {
+      final y = origin.dy + chartSize.height * i / 4;
+      canvas.drawLine(Offset(origin.dx, y), Offset(size.width, y), gridPaint);
+      labelPaint.text = TextSpan(
+        text: '${100 - (i * 25)}',
+        style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 9),
+      );
+      labelPaint.layout();
+      labelPaint.paint(canvas, Offset(0, y - 6));
+    }
+
+    const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    for (var i = 0; i < labels.length; i++) {
+      final x = origin.dx + chartSize.width * i / (labels.length - 1);
+      labelPaint.text = TextSpan(
+        text: labels[i],
+        style: const TextStyle(color: Color(0xFF64748B), fontSize: 10),
+      );
+      labelPaint.layout();
+      labelPaint.paint(
+        canvas,
+        Offset(x - labelPaint.width / 2, size.height - bottomPad + 6),
+      );
+    }
+
+    _drawChartLine(
+      canvas,
+      origin,
+      chartSize,
+      const [80, 68, 86, 78, 87, 67, 88],
+      const Color(0xFF1ABE8E),
+      fill: true,
+    );
+    _drawChartLine(canvas, origin, chartSize, const [
+      28,
+      41,
+      29,
+      37,
+      28,
+      48,
+      32,
+    ], const Color(0xFFFF5D6C));
+    _drawChartLine(canvas, origin, chartSize, const [
+      8,
+      12,
+      7,
+      13,
+      8,
+      12,
+      7,
+    ], const Color(0xFFFF9F2E));
+
+    _drawLegend(
+      canvas,
+      origin + const Offset(10, 8),
+      'Present',
+      const Color(0xFF1ABE8E),
+    );
+    _drawLegend(
+      canvas,
+      origin + const Offset(86, 8),
+      'Absent',
+      const Color(0xFFFF5D6C),
+    );
+    _drawLegend(
+      canvas,
+      origin + const Offset(158, 8),
+      'Late',
+      const Color(0xFFFF9F2E),
+    );
+  }
+
+  void _drawChartLine(
+    Canvas canvas,
+    Offset origin,
+    Size size,
+    List<double> values,
+    Color color, {
+    bool fill = false,
+  }) {
+    final points = <Offset>[];
+    for (var i = 0; i < values.length; i++) {
+      final x = origin.dx + size.width * i / (values.length - 1);
+      final y = origin.dy + size.height - (values[i] / 100 * size.height);
+      points.add(Offset(x, y));
+    }
+    final path = Path()..moveTo(points.first.dx, points.first.dy);
+    for (var i = 1; i < points.length; i++) {
+      final previous = points[i - 1];
+      final point = points[i];
+      final controlX = (previous.dx + point.dx) / 2;
+      path.cubicTo(
+        controlX,
+        previous.dy,
+        controlX,
+        point.dy,
+        point.dx,
+        point.dy,
+      );
+    }
+    if (fill) {
+      final fillPath = Path.from(path)
+        ..lineTo(origin.dx + size.width, origin.dy + size.height)
+        ..lineTo(origin.dx, origin.dy + size.height)
+        ..close();
+      canvas.drawPath(
+        fillPath,
+        Paint()
+          ..color = color.withValues(alpha: 0.12)
+          ..style = PaintingStyle.fill,
+      );
+    }
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = color
+        ..strokeWidth = 2
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round,
+    );
+  }
+
+  void _drawLegend(Canvas canvas, Offset offset, String label, Color color) {
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(offset.dx, offset.dy, 16, 4),
+        const Radius.circular(99),
+      ),
+      Paint()..color = color,
+    );
+    final painter = TextPainter(
+      text: TextSpan(
+        text: label,
+        style: const TextStyle(color: Color(0xFF475569), fontSize: 10),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    painter.paint(canvas, offset + const Offset(22, -5));
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class _HrHeroIllustrationPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width * 0.56, size.height * 0.5);
+    final blue = Paint()..color = const Color(0xFF5B8DEF);
+    final paleBlue = Paint()..color = const Color(0xFFDCEBFF);
+    final teal = Paint()..color = const Color(0xFF20C7A8);
+    final shadow = Paint()
+      ..color = const Color(0xFF0F172A).withValues(alpha: 0.08);
+
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: center + const Offset(4, 45),
+        width: 150,
+        height: 16,
+      ),
+      shadow,
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(center: center, width: 120, height: 82),
+        const Radius.circular(10),
+      ),
+      paleBlue,
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(center: center, width: 104, height: 64),
+        const Radius.circular(6),
+      ),
+      Paint()..color = Colors.white,
+    );
+    canvas.drawRect(
+      Rect.fromLTWH(center.dx - 52, center.dy - 32, 104, 13),
+      blue,
+    );
+    canvas.drawCircle(
+      center + const Offset(-32, 4),
+      9,
+      Paint()..color = const Color(0xFFFFC857),
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(center.dx - 16, center.dy - 6, 42, 8),
+        const Radius.circular(99),
+      ),
+      blue,
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(center.dx - 16, center.dy + 10, 58, 8),
+        const Radius.circular(99),
+      ),
+      Paint()..color = const Color(0xFFE2E8F0),
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(center.dx + 58, center.dy - 8, 54, 42),
+        const Radius.circular(8),
+      ),
+      Paint()..color = Colors.white.withValues(alpha: 0.86),
+    );
+    canvas.drawCircle(center + const Offset(76, 6), 7, teal);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(center.dx + 88, center.dy + 2, 18, 5),
+        const Radius.circular(99),
+      ),
+      blue,
+    );
+    final stem = Paint()
+      ..color = const Color(0xFF20C7A8)
+      ..strokeWidth = 4
+      ..strokeCap = StrokeCap.round;
+    final plantBase = Offset(center.dx - 92, center.dy + 38);
+    canvas.drawLine(plantBase, plantBase + const Offset(0, -46), stem);
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: plantBase + const Offset(-9, -28),
+        width: 18,
+        height: 30,
+      ),
+      Paint()..color = const Color(0xFF20C7A8),
+    );
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: plantBase + const Offset(10, -20),
+        width: 20,
+        height: 32,
+      ),
+      Paint()..color = const Color(0xFF45D3BA),
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(plantBase.dx - 15, plantBase.dy, 30, 9),
+        const Radius.circular(4),
+      ),
+      blue,
+    );
+    for (final dot in [
+      Offset(center.dx - 120, center.dy - 42),
+      Offset(center.dx - 86, center.dy - 54),
+      Offset(center.dx + 124, center.dy - 28),
+      Offset(center.dx + 116, center.dy + 38),
+    ]) {
+      canvas.drawCircle(dot, 3, Paint()..color = const Color(0xFF7AA7FF));
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
 class AttendanceReportDay {
   AttendanceReportDay({
     required this.date,
@@ -2832,6 +3209,9 @@ class _HomePageState extends State<HomePage> {
         _selectedHrSection = 'Employee Payroll';
         _selectedHrPayrollSection = 'Reimbursement';
         _selectedHrDashboardDetail = '';
+      } else if (menuKey == 'Notification' || menuKey == 'Notifications') {
+        _selectedHrSection = 'Notifications';
+        _selectedHrDashboardDetail = '';
       } else if (menuKey == 'Performance') {
         _selectedHrSection = 'Performance Tracker';
       }
@@ -4042,9 +4422,19 @@ class _HomePageState extends State<HomePage> {
                             ),
                           ],
                           _buildMenuItem(
+                            'Notifications',
+                            Icons.notifications,
+                            'Notifications',
+                          ),
+                          _buildMenuItem(
                             'Leaves',
                             Icons.calendar_today,
                             'Leaves',
+                          ),
+                          _buildMenuItem(
+                            'Helpdesk',
+                            Icons.support_agent,
+                            'Helpdesk',
                           ),
                         ],
 
@@ -4250,6 +4640,8 @@ class _HomePageState extends State<HomePage> {
                           ? _buildAdminReimbursementsView()
                           : _selectedMenu == 'Leaves'
                           ? _buildHrLeavesView()
+                          : _selectedMenu == 'Helpdesk'
+                          ? _buildHelpdeskView()
                           : _selectedMenu == 'Dashboard'
                           ? _buildHrDashboardView()
                           : _buildHrSectionView()
@@ -8868,9 +9260,11 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  InputDecoration _helpdeskIssueInputDecoration() {
+  InputDecoration _helpdeskIssueInputDecoration({
+    String hint = 'Describe your issue',
+  }) {
     return InputDecoration(
-      hintText: 'Describe your issue',
+      hintText: hint,
       prefixIcon: const Icon(Icons.report_problem_outlined),
       isDense: true,
       filled: true,
@@ -8894,175 +9288,492 @@ class _HomePageState extends State<HomePage> {
   Widget _buildHelpdeskView() {
     final issueDate = _readableDate(DateTime.now().toIso8601String());
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(32),
+      padding: const EdgeInsets.fromLTRB(28, 28, 28, 34),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isWide = constraints.maxWidth >= 960;
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(18),
+                  gradient: const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Color(0xFFEAF3FF),
+                      Color(0xFFF8FBFF),
+                      Color(0xFFE8FFF8),
+                    ],
+                  ),
+                  border: Border.all(color: Colors.white),
+                  boxShadow: _softShadow(0.05),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 58,
+                      height: 58,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF2B5AF0),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: const Icon(
+                        Icons.support_agent,
+                        color: Colors.white,
+                        size: 30,
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Helpdesk',
+                            style: Theme.of(context).textTheme.headlineSmall
+                                ?.copyWith(
+                                  color: _inkBlue,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: 0,
+                                ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Raise attendance, payroll, leave, or account issues and track every submission by date.',
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(
+                                  color: const Color(0xFF64748B),
+                                  height: 1.4,
+                                ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (isWide)
+                      _buildHelpdeskStatPill(
+                        '${_helpdeskTickets.length}',
+                        'Submitted issues',
+                        Icons.assignment,
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 22),
+              if (isWide)
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      flex: 4,
+                      child: _buildHelpdeskIssueForm(issueDate),
+                    ),
+                    const SizedBox(width: 18),
+                    Expanded(flex: 3, child: _buildHelpdeskSupportPanel()),
+                  ],
+                )
+              else ...[
+                _buildHelpdeskIssueForm(issueDate),
+                const SizedBox(height: 18),
+                _buildHelpdeskSupportPanel(),
+              ],
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Submitted Issues',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        color: _inkBlue,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Refresh helpdesk issues',
+                    onPressed: _isHelpdeskLoading
+                        ? null
+                        : _loadSelectedHelpdeskTickets,
+                    icon: _isHelpdeskLoading
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.refresh),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              _buildHelpdeskTicketsTable(),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildHelpdeskIssueForm(String issueDate) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _lineColor),
+        boxShadow: _softShadow(0.04),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildSectionHeader(
-            'Helpdesk',
-            'Contact support for attendance, leave, salary, and account help.',
-          ),
-          const SizedBox(height: 22),
           Row(
             children: [
-              Expanded(
-                child: _buildContactTile(
-                  'Email ID',
-                  'pvamshi2002@gmail.com',
-                  Icons.email_outlined,
-                  const Color(0xFF2B5AF0),
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: _brandTeal.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.add_comment,
+                  color: _brandTeal,
+                  size: 21,
                 ),
               ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: _buildContactTile(
-                  'Contact Number',
-                  '7867895432',
-                  Icons.phone_outlined,
-                  const Color(0xFF1ABE8E),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text(
+                  'Submit New Issue',
+                  style: TextStyle(
+                    color: _inkBlue,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 16),
           Container(
-            width: 560,
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.grey[200]!),
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: _lineColor),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Row(
               children: [
+                const Icon(
+                  Icons.calendar_today,
+                  color: Color(0xFF2B5AF0),
+                  size: 18,
+                ),
+                const SizedBox(width: 10),
                 Text(
-                  'Add Issue',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Table(
-                  columnWidths: const {
-                    0: FixedColumnWidth(120),
-                    1: FlexColumnWidth(),
-                  },
-                  border: TableBorder.all(color: Color(0xFFE5E7EB)),
-                  children: [
-                    TableRow(
-                      children: [
-                        const Padding(
-                          padding: EdgeInsets.all(10),
-                          child: Text(
-                            'Issue Date',
-                            style: TextStyle(fontWeight: FontWeight.w700),
-                          ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.all(10),
-                          child: Text(issueDate),
-                        ),
-                      ],
-                    ),
-                    TableRow(
-                      children: [
-                        const Padding(
-                          padding: EdgeInsets.all(10),
-                          child: Text(
-                            'Issue Reason',
-                            style: TextStyle(fontWeight: FontWeight.w700),
-                          ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.all(10),
-                          child: TextField(
-                            controller: _helpdeskIssueCtrl,
-                            maxLines: 2,
-                            decoration: _helpdeskIssueInputDecoration(),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 14),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: ElevatedButton(
-                    onPressed: _submitHelpdeskIssue,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF2B5AF0),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 26,
-                        vertical: 13,
-                      ),
-                    ),
-                    child: const Text(
-                      'Submit',
-                      style: TextStyle(color: Colors.white),
-                    ),
+                  issueDate,
+                  style: const TextStyle(
+                    color: _inkBlue,
+                    fontWeight: FontWeight.w800,
                   ),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 24),
-          _buildHelpdeskTicketsTable(),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _helpdeskIssueCtrl,
+            maxLines: 4,
+            decoration: _helpdeskIssueInputDecoration(
+              hint: 'Write your issue here...',
+            ),
+          ),
+          const SizedBox(height: 14),
+          Align(
+            alignment: Alignment.centerRight,
+            child: FilledButton.icon(
+              onPressed: _submitHelpdeskIssue,
+              icon: const Icon(Icons.send),
+              label: const Text('Submit Issue'),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF2B5AF0),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 14,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHelpdeskSupportPanel() {
+    final openCount = _helpdeskTickets.where((ticket) {
+      final status = ticket['status']?.toString().toLowerCase() ?? '';
+      return status == 'open' || status == 'pending' || status.isEmpty;
+    }).length;
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: _buildHelpdeskMiniCard(
+                'Open',
+                openCount.toString(),
+                Icons.mark_email_unread,
+                const Color(0xFFFF9F2E),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _buildHelpdeskMiniCard(
+                'Resolved',
+                (_helpdeskTickets.length - openCount).clamp(0, 999).toString(),
+                Icons.verified,
+                const Color(0xFF1ABE8E),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        _buildContactTile(
+          'Email ID',
+          'pvamshi2002@gmail.com',
+          Icons.email_outlined,
+          const Color(0xFF2B5AF0),
+        ),
+        const SizedBox(height: 12),
+        _buildContactTile(
+          'Contact Number',
+          '7867895432',
+          Icons.phone_outlined,
+          const Color(0xFF1ABE8E),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildHelpdeskStatPill(String value, String label, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.78),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: const Color(0xFF2B5AF0), size: 20),
+          const SizedBox(width: 10),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                value,
+                style: const TextStyle(
+                  color: _inkBlue,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: Color(0xFF64748B),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHelpdeskMiniCard(
+    String label,
+    String value,
+    IconData icon,
+    Color color,
+  ) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _lineColor),
+        boxShadow: _softShadow(0.035),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, color: color, size: 18),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  value,
+                  style: const TextStyle(
+                    color: _inkBlue,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                Text(
+                  label,
+                  style: const TextStyle(
+                    color: Color(0xFF64748B),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
   }
 
   Widget _buildHelpdeskTicketsTable() {
-    return Container(
-      width: double.infinity,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey[200]!),
-      ),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: DataTable(
-          headingRowColor: WidgetStateProperty.all(Colors.grey[100]),
-          headingTextStyle: const TextStyle(
-            color: Color(0xFF1F2E5A),
-            fontWeight: FontWeight.w700,
-            fontSize: 12,
-          ),
-          dataTextStyle: const TextStyle(
-            color: Color(0xFF344054),
-            fontSize: 12,
-          ),
-          columns: const [
-            DataColumn(label: Text('Subject')),
-            DataColumn(label: Text('Issue')),
-            DataColumn(label: Text('Created Date')),
-            DataColumn(label: Text('Resolved Date')),
-            DataColumn(label: Text('Status')),
-          ],
-          rows: _helpdeskTickets.map((ticket) {
-            return DataRow(
-              cells: [
-                DataCell(Text(ticket['subject']?.toString() ?? '-')),
-                DataCell(Text(ticket['description']?.toString() ?? '-')),
-                DataCell(
-                  Text(_readableDate(ticket['created_at']?.toString() ?? '')),
-                ),
-                DataCell(
-                  Text(_readableDate(ticket['resolved_at']?.toString() ?? '')),
-                ),
-                DataCell(
-                  _buildStatusPill(
-                    ticket['status_label']?.toString() ?? 'Open',
+    if (_isHelpdeskLoading) {
+      return const LinearProgressIndicator(minHeight: 3);
+    }
+    if (_helpdeskTickets.isEmpty) {
+      return _buildReportMessage(
+        icon: Icons.support_agent,
+        title: 'No issues submitted',
+        message: 'Submitted helpdesk issues will appear here by date.',
+      );
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = constraints.maxWidth >= 1000 ? 3 : 1;
+        return GridView.count(
+          crossAxisCount: columns,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 14,
+          crossAxisSpacing: 14,
+          childAspectRatio: columns == 1 ? 2.8 : 1.55,
+          children: _helpdeskTickets.map((ticket) {
+            final statusLabel = ticket['status_label']?.toString() ?? 'Open';
+            final status = statusLabel.toLowerCase();
+            final statusColor =
+                status.contains('resolved') ||
+                    status.contains('closed') ||
+                    status.contains('approved')
+                ? const Color(0xFF1ABE8E)
+                : status.contains('reject')
+                ? const Color(0xFFFF5D6C)
+                : const Color(0xFFFF9F2E);
+            return Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: _lineColor),
+                boxShadow: _softShadow(0.035),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 38,
+                        height: 38,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF2B5AF0).withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(
+                          Icons.confirmation_number_outlined,
+                          color: Color(0xFF2B5AF0),
+                          size: 20,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          ticket['subject']?.toString() ?? 'Helpdesk Issue',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: _inkBlue,
+                            fontWeight: FontWeight.w900,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                      _buildHrMiniPill(statusLabel, statusColor),
+                    ],
                   ),
-                ),
-              ],
+                  const SizedBox(height: 12),
+                  Text(
+                    ticket['description']?.toString() ?? '-',
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFF475569),
+                      fontSize: 12,
+                      height: 1.35,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const Spacer(),
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.calendar_today,
+                        size: 14,
+                        color: Color(0xFF64748B),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          _readableDate(ticket['created_at']?.toString() ?? ''),
+                          style: const TextStyle(
+                            color: Color(0xFF64748B),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      if ((ticket['resolved_at']?.toString() ?? '').isNotEmpty)
+                        Text(
+                          'Resolved: ${_readableDate(ticket['resolved_at']?.toString() ?? '')}',
+                          style: const TextStyle(
+                            color: Color(0xFF64748B),
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
             );
           }).toList(),
-        ),
-      ),
+        );
+      },
     );
   }
 
@@ -9135,106 +9846,935 @@ class _HomePageState extends State<HomePage> {
     final presentToday = _readInt(summary, 'present_today');
     final absentToday = _readInt(summary, 'absent_today');
     final todaysLeaves = _hrLeaveItemsForDate(_selectedHrDashboardDate).length;
+    final pendingLeaves = _readInt(summary, 'leave_requests');
+    final activeTasks = _readInt(summary, 'tasks_in_progress');
+    final activeEmployees = _readInt(summary, 'active_employees');
+    final employeesCount = totalEmployees == 0
+        ? activeEmployees
+        : totalEmployees;
+    final payrollMonth = _monthName(DateTime.now().month);
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(32),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 26),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isWide = constraints.maxWidth >= 980;
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildHrDashboardHero(),
+              const SizedBox(height: 18),
+              if (_isDashboardLoading)
+                const LinearProgressIndicator(minHeight: 3)
+              else if (_dashboardError != null)
+                _buildReportMessage(
+                  icon: Icons.error_outline,
+                  title: 'Dashboard not connected',
+                  message: _dashboardError!,
+                  actionLabel: 'Retry',
+                  onAction: loadDashboardData,
+                ),
+              if (_isDashboardLoading || _dashboardError != null)
+                const SizedBox(height: 18),
+              _buildHrMetricsGrid(
+                isWide: isWide,
+                children: [
+                  _buildHrMetricCard(
+                    title: 'Total Employees',
+                    value: employeesCount.toString(),
+                    subtitle: '+12 this month',
+                    icon: Icons.groups,
+                    color: const Color(0xFF2B5AF0),
+                    trend: const [20, 16, 18, 15, 22, 19, 28],
+                    onTap: () => setState(
+                      () => _selectedHrDashboardDetail = 'Total Employees',
+                    ),
+                  ),
+                  _buildHrMetricCard(
+                    title: 'Present Today',
+                    value: presentToday.toString(),
+                    subtitle: '75% of total',
+                    icon: Icons.event_available,
+                    color: const Color(0xFF1ABE8E),
+                    trend: const [18, 24, 17, 30, 23, 20, 27],
+                    onTap: () => setState(
+                      () => _selectedHrDashboardDetail = 'Present Today',
+                    ),
+                  ),
+                  _buildHrMetricCard(
+                    title: 'Absent Today',
+                    value: absentToday.toString(),
+                    subtitle: '25% of total',
+                    icon: Icons.group_remove,
+                    color: const Color(0xFFFF5D6C),
+                    trend: const [18, 12, 16, 10, 20, 11, 14],
+                    onTap: () => setState(
+                      () => _selectedHrDashboardDetail = 'Absent Today',
+                    ),
+                  ),
+                  _buildHrMetricCard(
+                    title: 'Pending Leaves',
+                    value: pendingLeaves == 0
+                        ? todaysLeaves.toString()
+                        : pendingLeaves.toString(),
+                    subtitle: 'Need approval',
+                    icon: Icons.pending_actions,
+                    color: const Color(0xFFFF9F2E),
+                    trend: const [12, 10, 11, 8, 16, 9, 12],
+                    onTap: () =>
+                        setState(() => _selectedHrDashboardDetail = 'Leaves'),
+                  ),
+                  _buildHrMetricCard(
+                    title: 'Payroll Status',
+                    value: '$payrollMonth ${DateTime.now().year}',
+                    subtitle: 'In Progress',
+                    icon: Icons.account_balance_wallet,
+                    color: const Color(0xFF8B5CF6),
+                    progress: 0.56,
+                    onTap: () => _selectMenu('Employee Payroll'),
+                  ),
+                  _buildHrMetricCard(
+                    title: 'Active Tasks',
+                    value: activeTasks.toString(),
+                    subtitle: 'Pending tasks',
+                    icon: Icons.assignment_turned_in,
+                    color: const Color(0xFF14B8A6),
+                    trend: const [15, 10, 17, 12, 24, 11, 18],
+                    onTap: () => _selectMenu('Dashboard'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 18),
+              if (isWide)
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(flex: 7, child: _buildHrAttendanceOverview()),
+                    const SizedBox(width: 18),
+                    Expanded(flex: 3, child: _buildHrQuickActionsPanel()),
+                  ],
+                )
+              else ...[
+                _buildHrAttendanceOverview(),
+                const SizedBox(height: 18),
+                _buildHrQuickActionsPanel(),
+              ],
+              const SizedBox(height: 18),
+              if (isWide)
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: _buildHrRecentActivityPanel()),
+                    const SizedBox(width: 18),
+                    Expanded(child: _buildHrPendingLeavesPanel()),
+                    const SizedBox(width: 18),
+                    Expanded(child: _buildHrNotificationsPanel()),
+                  ],
+                )
+              else ...[
+                _buildHrRecentActivityPanel(),
+                const SizedBox(height: 18),
+                _buildHrPendingLeavesPanel(),
+                const SizedBox(height: 18),
+                _buildHrNotificationsPanel(),
+              ],
+              const SizedBox(height: 24),
+              _buildHrDashboardFooter(),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildHrDashboardHero() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        gradient: const LinearGradient(
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+          colors: [Color(0xFFEAE8FF), Color(0xFFEAF3FF), Colors.white],
+        ),
+        boxShadow: _softShadow(0.04),
+      ),
+      child: Row(
         children: [
-          _buildWelcomeQuoteBanner(_currentDisplayName('HR'), 'HR'),
-          const SizedBox(height: 24),
-          Row(
-            children: [
-              Expanded(
-                child: _buildSectionHeader(
-                  'HR Dashboard',
-                  'Review workforce status and open focused HR dashboards.',
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Good Evening, ${_currentDisplayName('HR User')}!',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    color: const Color(0xFF0F172A),
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0,
+                  ),
                 ),
-              ),
-              IconButton.filled(
-                tooltip: 'Refresh dashboard',
-                onPressed: _isDashboardLoading ? null : refreshDashboardData,
-                style: IconButton.styleFrom(
-                  backgroundColor: const Color(0xFF2B5AF0),
-                  foregroundColor: Colors.white,
-                  disabledBackgroundColor: Colors.grey[300],
+                const SizedBox(height: 10),
+                Text(
+                  'Manage your workforce efficiently and keep everything running smoothly.',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: const Color(0xFF475569),
+                    height: 1.45,
+                  ),
                 ),
-                icon: _isDashboardLoading
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const Icon(Icons.refresh),
-              ),
-            ],
-          ),
-          const SizedBox(height: 24),
-          if (_isDashboardLoading)
-            const LinearProgressIndicator()
-          else if (_dashboardError != null)
-            _buildReportMessage(
-              icon: Icons.error_outline,
-              title: 'Dashboard not connected',
-              message: _dashboardError!,
-              actionLabel: 'Retry',
-              onAction: loadDashboardData,
+              ],
             ),
-          if (_isDashboardLoading || _dashboardError != null)
-            const SizedBox(height: 24),
-          GridView.extent(
-            maxCrossAxisExtent: 280,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            mainAxisSpacing: 16,
-            crossAxisSpacing: 16,
-            childAspectRatio: 1.9,
-            children: [
-              _buildSummaryTile(
-                'Total Employees',
-                totalEmployees.toString(),
-                Icons.groups,
-                const Color(0xFF2B5AF0),
-                isCompact: true,
-                onTap: () => setState(
-                  () => _selectedHrDashboardDetail = 'Total Employees',
+          ),
+          const SizedBox(width: 18),
+          if (MediaQuery.sizeOf(context).width > 760)
+            Expanded(
+              child: SizedBox(
+                height: 108,
+                child: CustomPaint(painter: _HrHeroIllustrationPainter()),
+              ),
+            ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.72),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.white),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.calendar_month,
+                  color: Color(0xFF1E3A8A),
+                  size: 20,
                 ),
-              ),
-              _buildSummaryTile(
-                'Present Today',
-                presentToday.toString(),
-                Icons.event_available,
-                const Color(0xFF1ABE8E),
-                isCompact: true,
-                onTap: () => setState(
-                  () => _selectedHrDashboardDetail = 'Present Today',
+                const SizedBox(width: 10),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _hrDateLine(DateTime.now()),
+                      style: const TextStyle(
+                        color: _inkBlue,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    Text(
+                      _hrTimeLine(DateTime.now()),
+                      style: const TextStyle(
+                        color: Color(0xFF64748B),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-              _buildSummaryTile(
-                'Absent Today',
-                absentToday.toString(),
-                Icons.event_busy,
-                Colors.red,
-                isCompact: true,
-                onTap: () =>
-                    setState(() => _selectedHrDashboardDetail = 'Absent Today'),
-              ),
-              _buildSummaryTile(
-                'Leaves',
-                todaysLeaves.toString(),
-                Icons.calendar_today,
-                Colors.teal,
-                isCompact: true,
-                onTap: () =>
-                    setState(() => _selectedHrDashboardDetail = 'Leaves'),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),
     );
+  }
+
+  Widget _buildHrMetricsGrid({
+    required bool isWide,
+    required List<Widget> children,
+  }) {
+    return GridView.count(
+      crossAxisCount: isWide ? 6 : 2,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      mainAxisSpacing: 14,
+      crossAxisSpacing: 14,
+      childAspectRatio: isWide ? 1.08 : 1.35,
+      children: children,
+    );
+  }
+
+  Widget _buildHrMetricCard({
+    required String title,
+    required String value,
+    required String subtitle,
+    required IconData icon,
+    required Color color,
+    List<double>? trend,
+    double? progress,
+    VoidCallback? onTap,
+  }) {
+    final card = Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: _lineColor),
+        boxShadow: _softShadow(0.04),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(icon, color: color, size: 20),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFF475569),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Color(0xFF0F172A),
+              fontSize: 21,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            subtitle,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: color,
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const Spacer(),
+          if (progress != null)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(99),
+              child: LinearProgressIndicator(
+                minHeight: 5,
+                value: progress,
+                backgroundColor: const Color(0xFFEFF4FF),
+                valueColor: AlwaysStoppedAnimation<Color>(color),
+              ),
+            )
+          else
+            SizedBox(
+              height: 30,
+              width: double.infinity,
+              child: CustomPaint(
+                painter: _HrSparklinePainter(
+                  values: trend ?? const [12, 18, 14, 20, 17, 22, 24],
+                  color: color,
+                  fill: false,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+    if (onTap == null) return card;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        child: card,
+      ),
+    );
+  }
+
+  Widget _buildHrPanel({
+    required String title,
+    Widget? trailing,
+    required Widget child,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: _lineColor),
+        boxShadow: _softShadow(0.04),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    color: Color(0xFF0F172A),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              if (trailing != null) trailing,
+            ],
+          ),
+          const SizedBox(height: 14),
+          child,
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHrAttendanceOverview() {
+    return _buildHrPanel(
+      title: 'Attendance Overview',
+      trailing: _buildHrSmallMenuLabel('This Week'),
+      child: SizedBox(
+        height: 205,
+        child: CustomPaint(
+          painter: _HrAttendanceChartPainter(),
+          child: const SizedBox.expand(),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHrSmallMenuLabel(String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: _lineColor),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              color: Color(0xFF334155),
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(width: 4),
+          const Icon(
+            Icons.keyboard_arrow_down,
+            size: 16,
+            color: Color(0xFF64748B),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHrQuickActionsPanel() {
+    final actions = [
+      (
+        'Add Employee',
+        Icons.group_add,
+        const Color(0xFF2B5AF0),
+        () => _selectMenu('Employee Management'),
+      ),
+      (
+        'Mark Attendance',
+        Icons.event_available,
+        const Color(0xFF1ABE8E),
+        () => _selectMenu('Attendance'),
+      ),
+      (
+        'Approve Leaves',
+        Icons.pending_actions,
+        const Color(0xFFFF9F2E),
+        () => _selectMenu('Leaves'),
+      ),
+      (
+        'Generate Payslip',
+        Icons.receipt_long,
+        const Color(0xFF8B5CF6),
+        () => _selectMenu('Employee Payroll'),
+      ),
+    ];
+    return _buildHrPanel(
+      title: 'Quick Actions',
+      child: Column(
+        children: actions.map((action) {
+          return Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            child: Material(
+              color: const Color(0xFFFBFCFF),
+              borderRadius: BorderRadius.circular(8),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: action.$4,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 11,
+                  ),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: _lineColor),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 28,
+                        height: 28,
+                        decoration: BoxDecoration(
+                          color: action.$3.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(action.$2, color: action.$3, size: 16),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          action.$1,
+                          style: const TextStyle(
+                            color: Color(0xFF0F172A),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                      const Icon(
+                        Icons.chevron_right,
+                        color: Color(0xFF64748B),
+                        size: 18,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _buildHrRecentActivityPanel() {
+    final rows = _hrRecentActivityRows();
+    return _buildHrPanel(
+      title: 'Recent Employee Activity',
+      trailing: _buildHrTextAction('View All', () => _selectMenu('Attendance')),
+      child: Column(
+        children: [
+          _buildHrTableHeader(['Employee', 'Action', 'Time', 'Status']),
+          ...rows.map((row) {
+            final color = row.status == 'Pending'
+                ? const Color(0xFFFF9F2E)
+                : row.status == 'Completed'
+                ? const Color(0xFF2B5AF0)
+                : const Color(0xFF1ABE8E);
+            return _buildHrCompactRow([
+              _buildHrAvatarLabel(row.employee, row.color),
+              Text(row.action, style: _hrCellStyle()),
+              Text(row.time, style: _hrCellStyle()),
+              _buildHrMiniPill(row.status, color),
+            ]);
+          }),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHrPendingLeavesPanel() {
+    final leaves = _hrPendingLeaveRows();
+    return _buildHrPanel(
+      title: 'Pending Leave Requests',
+      trailing: _buildHrTextAction('View All', () => _selectMenu('Leaves')),
+      child: Column(
+        children: [
+          _buildHrTableHeader(['Employee', 'Leave Type', 'Duration', 'Action']),
+          ...leaves.map((leave) {
+            return _buildHrCompactRow([
+              Text(leave.employee, style: _hrCellStyle(isStrong: true)),
+              Text(leave.type, style: _hrCellStyle()),
+              Text(leave.duration, style: _hrCellStyle()),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  _buildHrDisabledCircleAction(
+                    Icons.check,
+                    const Color(0xFF1ABE8E),
+                  ),
+                  const SizedBox(width: 8),
+                  _buildHrDisabledCircleAction(
+                    Icons.close,
+                    const Color(0xFFFF5D6C),
+                  ),
+                ],
+              ),
+            ]);
+          }),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHrNotificationsPanel() {
+    final items = [
+      (
+        'Leave request approved',
+        'Ravi Teja leave has been approved.',
+        '10 min ago',
+        Icons.check,
+        const Color(0xFF1ABE8E),
+      ),
+      (
+        'Salary generated',
+        'May ${DateTime.now().year} salary generated successfully.',
+        '1 hour ago',
+        Icons.info,
+        const Color(0xFF38BDF8),
+      ),
+      (
+        'Attendance alert',
+        '5 employees marked absent today.',
+        '2 hours ago',
+        Icons.warning_amber,
+        const Color(0xFFFF9F2E),
+      ),
+      (
+        'New employee added',
+        'A new employee was added successfully.',
+        '3 hours ago',
+        Icons.person_add_alt,
+        const Color(0xFF8B5CF6),
+      ),
+    ];
+    return _buildHrPanel(
+      title: 'Recent Notifications',
+      trailing: _buildHrTextAction(
+        'View All',
+        () => _selectMenu('Notifications'),
+      ),
+      child: Column(
+        children: items.map((item) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 14),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                CircleAvatar(
+                  radius: 15,
+                  backgroundColor: item.$5,
+                  child: Icon(item.$4, color: Colors.white, size: 16),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        item.$1,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: _hrCellStyle(isStrong: true),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        item.$2,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: _hrCellStyle().copyWith(
+                          color: const Color(0xFF64748B),
+                          fontSize: 10,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  item.$3,
+                  style: _hrCellStyle().copyWith(
+                    color: const Color(0xFF64748B),
+                    fontSize: 10,
+                  ),
+                ),
+              ],
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _buildHrTextAction(String label, VoidCallback onTap) {
+    return TextButton(
+      onPressed: onTap,
+      style: TextButton.styleFrom(
+        padding: EdgeInsets.zero,
+        minimumSize: const Size(44, 28),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
+      ),
+    );
+  }
+
+  Widget _buildHrTableHeader(List<String> labels) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: labels.map((label) {
+          return Expanded(
+            child: Text(
+              label,
+              textAlign: label == 'Action' ? TextAlign.right : TextAlign.left,
+              style: const TextStyle(
+                color: Color(0xFF475569),
+                fontSize: 10,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _buildHrCompactRow(List<Widget> cells) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 7),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: cells.map((cell) => Expanded(child: cell)).toList(),
+      ),
+    );
+  }
+
+  TextStyle _hrCellStyle({bool isStrong = false}) {
+    return TextStyle(
+      color: const Color(0xFF0F172A),
+      fontSize: 11,
+      fontWeight: isStrong ? FontWeight.w800 : FontWeight.w600,
+    );
+  }
+
+  Widget _buildHrAvatarLabel(String name, Color color) {
+    final parts = name.trim().split(RegExp(r'\s+'));
+    final initials = parts
+        .where((part) => part.isNotEmpty)
+        .take(2)
+        .map((part) => part[0].toUpperCase())
+        .join();
+    return Row(
+      children: [
+        CircleAvatar(
+          radius: 13,
+          backgroundColor: color.withValues(alpha: 0.18),
+          child: Text(
+            initials.isEmpty ? 'HR' : initials,
+            style: TextStyle(
+              color: color,
+              fontSize: 9,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: _hrCellStyle(isStrong: true),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildHrMiniPill(String label, Color color) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: color,
+            fontSize: 9,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHrDisabledCircleAction(IconData icon, Color color) {
+    return Container(
+      width: 24,
+      height: 24,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(color: color.withValues(alpha: 0.45)),
+      ),
+      child: Icon(icon, color: color, size: 15),
+    );
+  }
+
+  Widget _buildHrDashboardFooter() {
+    return Row(
+      children: [
+        const Expanded(
+          child: Text(
+            '© 2026 HealOn HR Panel. All rights reserved.',
+            style: TextStyle(color: Color(0xFF64748B), fontSize: 11),
+          ),
+        ),
+        TextButton(onPressed: () {}, child: const Text('Privacy Policy')),
+        TextButton(onPressed: () {}, child: const Text('Support')),
+      ],
+    );
+  }
+
+  List<_HrActivityRow> _hrRecentActivityRows() {
+    final attendanceRows = (_adminAttendance?['rows'] as List<dynamic>? ?? [])
+        .whereType<Map<String, dynamic>>()
+        .take(5)
+        .toList();
+    if (attendanceRows.isNotEmpty) {
+      return attendanceRows.map((row) {
+        final status = row['status']?.toString() ?? 'Present';
+        return _HrActivityRow(
+          employee: row['employee']?.toString() ?? 'Employee',
+          action: status == 'Present' ? 'Checked In' : 'Attendance Updated',
+          time: row['check_in']?.toString() == ''
+              ? '--'
+              : row['check_in']?.toString() ?? '--',
+          status: status,
+          color: status == 'Present'
+              ? const Color(0xFF1ABE8E)
+              : const Color(0xFFFF9F2E),
+        );
+      }).toList();
+    }
+    const names = [
+      'John Smith',
+      'Ravi Teja',
+      'Priya Alex',
+      'Amit Kumar',
+      'Neha',
+    ];
+    const actions = [
+      'Checked In',
+      'Leave Request',
+      'Checked Out',
+      'Leave Approved',
+      'Salary Processed',
+    ];
+    const statuses = ['Present', 'Pending', 'Present', 'Approved', 'Completed'];
+    const colors = [
+      Color(0xFFFF5D6C),
+      Color(0xFFFF5D6C),
+      Color(0xFFFFC857),
+      Color(0xFFFF9F2E),
+      Color(0xFF2B5AF0),
+    ];
+    return List.generate(names.length, (index) {
+      return _HrActivityRow(
+        employee: names[index],
+        action: actions[index],
+        time: [
+          '09:02 AM',
+          '10:15 AM',
+          '06:05 PM',
+          '02:30 PM',
+          '11:45 AM',
+        ][index],
+        status: statuses[index],
+        color: colors[index],
+      );
+    });
+  }
+
+  List<_HrLeaveRow> _hrPendingLeaveRows() {
+    final requests =
+        (_adminDashboard?['pending_requests'] as Map<String, dynamic>?) ?? {};
+    final leaves = (requests['leaves'] as List<dynamic>? ?? [])
+        .whereType<Map<String, dynamic>>()
+        .where((leave) {
+          return (leave['status']?.toString().toLowerCase() ?? '') == 'pending';
+        })
+        .take(4)
+        .toList();
+    if (leaves.isNotEmpty) {
+      return leaves.map((leave) {
+        return _HrLeaveRow(
+          employee: leave['employee']?.toString() ?? 'Employee',
+          type: leave['type']?.toString() ?? 'Leave',
+          duration: '${leave['days']?.toString() ?? '-'} Days',
+        );
+      }).toList();
+    }
+    return const [
+      _HrLeaveRow(
+        employee: 'Ravi Teja',
+        type: 'Casual Leave',
+        duration: '2 Days',
+      ),
+      _HrLeaveRow(
+        employee: 'Priya Alex',
+        type: 'Medical Leave',
+        duration: '3 Days',
+      ),
+      _HrLeaveRow(
+        employee: 'Amit Kumar',
+        type: 'Casual Leave',
+        duration: '1 Day',
+      ),
+      _HrLeaveRow(
+        employee: 'Neha Kumari',
+        type: 'Earned Leave',
+        duration: '5 Days',
+      ),
+    ];
+  }
+
+  String _hrDateLine(DateTime date) {
+    const weekdays = [
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+      'Sunday',
+    ];
+    return '${weekdays[date.weekday - 1]}, ${date.day} ${_monthName(date.month)} ${date.year}';
+  }
+
+  String _hrTimeLine(DateTime date) {
+    final hour = date.hour % 12 == 0 ? 12 : date.hour % 12;
+    final minute = date.minute.toString().padLeft(2, '0');
+    final suffix = date.hour >= 12 ? 'PM' : 'AM';
+    return '$hour:$minute $suffix';
   }
 
   Widget _buildHrDetailScaffold({
@@ -9829,6 +11369,13 @@ class _HomePageState extends State<HomePage> {
       description = 'Manage employee payroll operations.';
       message =
           'Employee payroll data will appear here when records are added.';
+    } else if (menu == 'Notification' || menu == 'Notifications') {
+      icon = Icons.notifications;
+      color = const Color(0xFF2B5AF0);
+      primaryLabel = 'Notifications';
+      description = 'Review HR notifications and employee alerts.';
+      message =
+          'Employee notifications will appear here when records are added.';
     } else if (menu == 'Leaves') {
       icon = Icons.calendar_today;
       color = Colors.teal;
