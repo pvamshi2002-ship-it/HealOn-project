@@ -1,0 +1,69 @@
+{% extends 'admin/base.html' %}
+{% load i18n static jazzmin admin_urls %}
+
+{% block sidebar %}
+{% if jazzmin_settings.show_sidebar %}
+  <aside class="app-sidebar bg-body-secondary shadow {{ jazzmin_ui.sidebar_classes }}" id="jazzy-sidebar" data-bs-theme="dark">
+    <div class="sidebar-brand">
+      <a href="{% url 'admin:index' %}" class="brand-link {{ jazzmin_ui.brand_classes }}" id="jazzy-logo">
+        <img src="{% static jazzmin_settings.site_logo %}" alt="{{ jazzmin_settings.site_header }} Logo" class="{{ jazzmin_settings.site_logo_classes }} brand-image opacity-75 shadow">
+        <span class="brand-text fw-light">{{ jazzmin_settings.site_brand }}</span>
+      </a>
+    </div>
+
+    <div class="sidebar-wrapper">
+      <div class="user-panel d-flex">
+        <div class="image">
+          {% if jazzmin_settings|has_jazzmin_setting:"user_avatar" %}
+            <img src="{% get_user_avatar request.user %}" width="160px" class="img-circle elevation-2" alt="User Image">
+          {% else %}
+            <i class="fas fa-inverse user-profile fa-user-circle"></i>
+          {% endif %}
+        </div>
+        <div class="info">
+          {% if perms|can_view_self %}
+            <a href="{% jazzy_admin_url request.user request.current_app|default:"admin" %}" class="d-block">{{ request.user }}</a>
+          {% else %}
+            <span class="d-block opacity-75">{{ request.user }}</span>
+          {% endif %}
+        </div>
+      </div>
+
+      <nav class="mt-2">
+        <ul class="nav sidebar-menu flex-column {{ jazzmin_ui.sidebar_list_classes }}" data-lte-toggle="treeview" role="navigation" aria-label="Main navigation" data-accordion="false" id="jazzy-navigation">
+          <li class="nav-item">
+            <a href="{% url 'admin:index' %}" class="nav-link">
+              <i class="nav-icon fas fa-th-large"></i>
+              <p>{% trans 'Dashboard' %}</p>
+            </a>
+          </li>
+
+          <li class="nav-header">HR Management</li>
+          <li class="nav-item"><a href="{% url 'admin:auth_user_changelist' %}" class="nav-link"><i class="nav-icon fas fa-users"></i><p>Employees</p></a></li>
+          <li class="nav-item"><a href="{% url 'admin:people_userprofile_changelist' %}" class="nav-link"><i class="nav-icon fas fa-id-badge"></i><p>User Profiles</p></a></li>
+          <li class="nav-item"><a href="{% url 'admin:people_assignedlocation_changelist' %}" class="nav-link"><i class="nav-icon fas fa-map-marker-alt"></i><p>Assigned Locations</p></a></li>
+
+          <li class="nav-header">Attendance Management</li>
+          <li class="nav-item"><a href="{% url 'admin:people_attendance_changelist' %}" class="nav-link"><i class="nav-icon fas fa-calendar-check"></i><p>Attendances</p></a></li>
+          <li class="nav-item"><a href="{% url 'admin:people_attendanceregularization_changelist' %}" class="nav-link"><i class="nav-icon fas fa-clipboard-list"></i><p>Attendance Requests</p></a></li>
+
+          <li class="nav-header">Payroll Management</li>
+          <li class="nav-item"><a href="{% url 'admin:people_salaryrecord_changelist' %}" class="nav-link"><i class="nav-icon fas fa-wallet"></i><p>Salary Records</p></a></li>
+          <li class="nav-item"><a href="{% url 'admin:people_reimbursementrequest_changelist' %}" class="nav-link"><i class="nav-icon fas fa-file-invoice-dollar"></i><p>Reimbursement Requests</p></a></li>
+
+          <li class="nav-header">Leave Management</li>
+          <li class="nav-item"><a href="{% url 'admin:people_leaverequest_changelist' %}" class="nav-link"><i class="nav-icon fas fa-plane-departure"></i><p>Leave Requests</p></a></li>
+          <li class="nav-item"><a href="{% url 'admin:people_holiday_changelist' %}" class="nav-link"><i class="nav-icon fas fa-calendar-day"></i><p>Holidays</p></a></li>
+
+          <li class="nav-header">Support Center</li>
+          <li class="nav-item"><a href="{% url 'admin:people_helpdeskticket_changelist' %}" class="nav-link"><i class="nav-icon fas fa-headset"></i><p>Helpdesk Tickets</p></a></li>
+          <li class="nav-item"><a href="{% url 'admin:people_passwordresetotp_changelist' %}" class="nav-link"><i class="nav-icon fas fa-key"></i><p>Password Reset Requests</p></a></li>
+
+          <li class="nav-header">Organization</li>
+          <li class="nav-item"><a href="{% url 'admin:people_employeetask_changelist' %}" class="nav-link"><i class="nav-icon fas fa-tasks"></i><p>Employee Tasks</p></a></li>
+        </ul>
+      </nav>
+    </div>
+  </aside>
+{% endif %}
+{% endblock %}

@@ -2822,6 +2822,10 @@ class _HomePageState extends State<HomePage> {
         _selectedPendingRequestStatus = 'pending';
       } else if (menuKey == 'Helpdesk' || menuKey == 'Help Desk') {
         _selectedHrSection = 'Help Desk';
+        _selectedHrDashboardDetail = '';
+      } else if (menuKey == 'Notifications') {
+        _selectedHrSection = 'Notifications';
+        _selectedHrDashboardDetail = '';
       } else if (menuKey == 'Attendance Management') {
         _selectedHrSection = 'Daily Attendance';
       } else if (menuKey == 'Recruitment') {
@@ -2859,6 +2863,7 @@ class _HomePageState extends State<HomePage> {
         menuKey == 'Pending Requests' ||
         menuKey == 'Employee Management' ||
         menuKey == 'Employee Location' ||
+        menuKey == 'Notifications' ||
         menuKey == 'Leaves') {
       loadDashboardData();
     }
@@ -4046,6 +4051,12 @@ class _HomePageState extends State<HomePage> {
                             Icons.calendar_today,
                             'Leaves',
                           ),
+                          _buildMenuItem(
+                            'Notifications',
+                            Icons.notifications_active_outlined,
+                            'Notifications',
+                          ),
+                          _buildMenuItem('Helpdesk', Icons.help, 'Helpdesk'),
                         ],
 
                         // ================= ADMIN PANEL =================
@@ -4250,6 +4261,10 @@ class _HomePageState extends State<HomePage> {
                           ? _buildAdminReimbursementsView()
                           : _selectedMenu == 'Leaves'
                           ? _buildHrLeavesView()
+                          : _selectedMenu == 'Notifications'
+                          ? _buildHrNotificationsView()
+                          : _selectedMenu == 'Helpdesk'
+                          ? _buildHrHelpdeskDetail()
                           : _selectedMenu == 'Dashboard'
                           ? _buildHrDashboardView()
                           : _buildHrSectionView()
@@ -4481,6 +4496,36 @@ class _HomePageState extends State<HomePage> {
                                       isCompact: true,
                                     ),
                                   ),
+                                ],
+                              ),
+                              const SizedBox(height: 24),
+                              _buildDashboardAnalyticsPanel(
+                                'User Dashboard - ${_currentUser?['name'] ?? 'Employee'}',
+                                [
+                                  {
+                                    'label': 'Present Days',
+                                    'value': _readInt(
+                                      _userSection('attendance'),
+                                      'present_days_this_month',
+                                    ),
+                                    'color': const Color(0xFF1ABE8E),
+                                  },
+                                  {
+                                    'label': 'Leave Balance',
+                                    'value': _readInt(
+                                      _userSection('leaves'),
+                                      'available',
+                                    ),
+                                    'color': Colors.orange,
+                                  },
+                                  {
+                                    'label': 'Leave Applied',
+                                    'value': _readInt(
+                                      _userSection('leaves'),
+                                      'applied',
+                                    ),
+                                    'color': Colors.orange,
+                                  },
                                 ],
                               ),
                               const SizedBox(height: 24),
@@ -9129,7 +9174,6 @@ class _HomePageState extends State<HomePage> {
     if (_selectedHrDashboardDetail == 'Leaves') {
       return _buildHrLeavesDetail();
     }
-
     final summary = _adminDashboard?['summary'] as Map<String, dynamic>?;
     final totalEmployees = _readInt(summary, 'total_employees');
     final presentToday = _readInt(summary, 'present_today');
@@ -9232,6 +9276,245 @@ class _HomePageState extends State<HomePage> {
               ),
             ],
           ),
+          const SizedBox(height: 24),
+          _buildDashboardAnalyticsPanel('HR Dashboard', [
+            {
+              'label': 'Total Employees',
+              'value': totalEmployees,
+              'color': const Color(0xFF2B5AF0),
+            },
+            {
+              'label': 'Present Today',
+              'value': presentToday,
+              'color': const Color(0xFF1ABE8E),
+            },
+            {
+              'label': 'Absent Today',
+              'value': absentToday,
+              'color': Colors.red,
+            },
+            {'label': 'Leaves', 'value': todaysLeaves, 'color': Colors.teal},
+          ]),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHrNotificationsView() {
+    final notifications = _adminPendingWorkItems().take(4).toList();
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(32),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSectionHeader(
+            'Notifications',
+            'Review pending approvals, support updates, and workforce activity.',
+          ),
+          const SizedBox(height: 24),
+          _buildHrNotificationPanel(notifications),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHrNotificationPanel(List<Map<String, dynamic>> notifications) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: _lineColor),
+        boxShadow: _softShadow(0.06),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: Colors.orange.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.notifications_active_outlined,
+                  color: Colors.orange,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Notifications',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: _inkBlue,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          if (notifications.isEmpty)
+            Text(
+              'No notifications available.',
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: const Color(0xFF64748B)),
+            )
+          else
+            ...notifications.map((item) {
+              return Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: _lineColor),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.circle, size: 8, color: Color(0xFF2B5AF0)),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            item['type']?.toString() ?? 'Notification',
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(
+                                  color: _inkBlue,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            '${item['employee'] ?? '-'} - ${item['title'] ?? '-'}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(color: const Color(0xFF64748B)),
+                          ),
+                        ],
+                      ),
+                    ),
+                    _buildStatusPill(item['status']?.toString() ?? 'Pending'),
+                  ],
+                ),
+              );
+            }),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHrHelpdeskDetail() {
+    final issueDate = _readableDate(DateTime.now().toIso8601String());
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(32),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSectionHeader(
+            'Helpdesk',
+            'Submit support issues and review issue resolution activity.',
+          ),
+          const SizedBox(height: 24),
+          Container(
+            width: 620,
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: _lineColor),
+              boxShadow: _softShadow(0.06),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Add Issue',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: _inkBlue,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Table(
+                  columnWidths: const {
+                    0: FixedColumnWidth(130),
+                    1: FlexColumnWidth(),
+                  },
+                  border: TableBorder.all(color: _lineColor),
+                  children: [
+                    TableRow(
+                      children: [
+                        const Padding(
+                          padding: EdgeInsets.all(12),
+                          child: Text(
+                            'Issue Date',
+                            style: TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Text(issueDate),
+                        ),
+                      ],
+                    ),
+                    TableRow(
+                      children: [
+                        const Padding(
+                          padding: EdgeInsets.all(12),
+                          child: Text(
+                            'Issue Reason',
+                            style: TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: TextField(
+                            controller: _helpdeskIssueCtrl,
+                            maxLines: 3,
+                            decoration: _helpdeskIssueInputDecoration(),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: ElevatedButton(
+                    onPressed: _submitHelpdeskIssue,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF2B5AF0),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 28,
+                        vertical: 14,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text('Submit'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+          if (_isHelpdeskLoading)
+            const LinearProgressIndicator()
+          else
+            _buildHelpdeskTicketsTable(),
         ],
       ),
     );
@@ -10035,13 +10318,14 @@ class _HomePageState extends State<HomePage> {
     bool isCompact = false,
     VoidCallback? onTap,
   }) {
-    final tile = Container(
+    final tile = AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
       padding: EdgeInsets.all(isCompact ? 14 : 20),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(color: _lineColor),
-        boxShadow: _softShadow(0.05),
+        boxShadow: _softShadow(0.06),
       ),
       child: Row(
         children: [
@@ -10050,7 +10334,7 @@ class _HomePageState extends State<HomePage> {
             height: isCompact ? 38 : 46,
             decoration: BoxDecoration(
               color: color.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(12),
             ),
             child: Icon(icon, color: color, size: isCompact ? 21 : 25),
           ),
@@ -10089,7 +10373,7 @@ class _HomePageState extends State<HomePage> {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(18),
         onTap: onTap,
         child: tile,
       ),
@@ -10171,6 +10455,86 @@ class _HomePageState extends State<HomePage> {
           fontWeight: FontWeight.w800,
           fontSize: 12,
         ),
+      ),
+    );
+  }
+
+  Widget _buildDashboardAnalyticsPanel(
+    String title,
+    List<Map<String, Object>> items,
+  ) {
+    final maxValue = items.fold<int>(1, (current, item) {
+      final value = item['value'] as int? ?? 0;
+      return value > current ? value : current;
+    });
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: _lineColor),
+        boxShadow: _softShadow(0.06),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              color: _inkBlue,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 18),
+          ...items.map((item) {
+            final label = item['label'] as String? ?? '';
+            final value = item['value'] as int? ?? 0;
+            final color = item['color'] as Color? ?? _brandBlue;
+            final ratio = maxValue == 0 ? 0.0 : value / maxValue;
+
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          label,
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: const Color(0xFF475569),
+                                fontWeight: FontWeight.w700,
+                              ),
+                        ),
+                      ),
+                      Text(
+                        value.toString(),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: _inkBlue,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(999),
+                    child: LinearProgressIndicator(
+                      minHeight: 8,
+                      value: ratio.clamp(0.0, 1.0),
+                      color: color,
+                      backgroundColor: color.withValues(alpha: 0.12),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
       ),
     );
   }
@@ -10276,6 +10640,19 @@ class _HomePageState extends State<HomePage> {
               ),
             ],
           ),
+          const SizedBox(height: 24),
+          _buildDashboardAnalyticsPanel('Admin Dashboard', [
+            {
+              'label': 'Total Employees',
+              'value': _readInt(summary, 'total_employees'),
+              'color': const Color(0xFF2B5AF0),
+            },
+            {
+              'label': 'Total Requests',
+              'value': _readInt(summary, 'total_requests'),
+              'color': Colors.purple,
+            },
+          ]),
         ],
       ),
     );
@@ -10729,13 +11106,14 @@ class _HomePageState extends State<HomePage> {
     Color color, {
     VoidCallback? onTap,
   }) {
-    final card = Container(
+    final card = AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(20),
         border: Border.all(color: _lineColor),
-        boxShadow: _softShadow(0.05),
+        boxShadow: _softShadow(0.07),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -10745,7 +11123,7 @@ class _HomePageState extends State<HomePage> {
             height: 42,
             decoration: BoxDecoration(
               color: color.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(12),
             ),
             child: Icon(icon, size: 23, color: color),
           ),
@@ -10777,7 +11155,7 @@ class _HomePageState extends State<HomePage> {
     }
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: BorderRadius.circular(20),
       child: card,
     );
   }
@@ -13340,13 +13718,14 @@ class _HomePageState extends State<HomePage> {
     IconData icon,
     Color color,
   ) {
-    return Container(
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
       padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(20),
         border: Border.all(color: _lineColor),
-        boxShadow: _softShadow(0.05),
+        boxShadow: _softShadow(0.07),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -13356,7 +13735,7 @@ class _HomePageState extends State<HomePage> {
             height: 46,
             decoration: BoxDecoration(
               color: color.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(12),
             ),
             child: Icon(icon, size: 25, color: color),
           ),

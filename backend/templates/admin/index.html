@@ -1,0 +1,186 @@
+{% extends "admin/base_site.html" %}
+{% load static i18n %}
+
+{% block content %}
+{{ healon_dashboard.chart_data|json_script:"healon-chart-data" }}
+
+<section class="healon-dashboard">
+  <div class="healon-hero">
+    <div>
+      <p class="healon-kicker">Enterprise Admin Workspace</p>
+      <h1>Welcome Admin</h1>
+      <p class="healon-muted">HealOn Admin System</p>
+    </div>
+    <div class="healon-profile-chip">
+      <i class="fas fa-user-shield"></i>
+      <span>{{ request.user.get_full_name|default:request.user.username }}</span>
+    </div>
+  </div>
+
+  <div class="healon-metrics">
+    {% for metric in healon_dashboard.metrics %}
+      <a class="healon-metric healon-tone-{{ metric.tone }}" href="{{ metric.url }}">
+        <span class="healon-metric-icon"><i class="{{ metric.icon }}"></i></span>
+        <span class="healon-metric-value">{{ metric.value }}</span>
+        <span class="healon-metric-label">{{ metric.label }}</span>
+      </a>
+    {% endfor %}
+  </div>
+
+  <div class="healon-grid healon-grid-main">
+    <article class="healon-panel">
+      <div class="healon-panel-head">
+        <h2>Attendance Trends</h2>
+        <span>Monthly attendance events</span>
+      </div>
+      <canvas id="attendanceTrendChart" height="140"></canvas>
+    </article>
+
+    <article class="healon-panel">
+      <div class="healon-panel-head">
+        <h2>Leave Analytics</h2>
+        <span>Status distribution</span>
+      </div>
+      <canvas id="leaveAnalyticsChart" height="140"></canvas>
+    </article>
+  </div>
+
+  <div class="healon-grid healon-grid-main">
+    <article class="healon-panel">
+      <div class="healon-panel-head">
+        <h2>Employee Growth</h2>
+        <span>New employees by month</span>
+      </div>
+      <canvas id="employeeGrowthChart" height="140"></canvas>
+    </article>
+
+    <article class="healon-panel">
+      <div class="healon-panel-head">
+        <h2>Payroll Summary</h2>
+        <span>Gross payroll by month</span>
+      </div>
+      <canvas id="payrollSummaryChart" height="140"></canvas>
+    </article>
+  </div>
+
+  <div class="healon-grid healon-grid-widgets">
+    <article class="healon-panel">
+      <div class="healon-panel-head">
+        <h2>Quick Actions</h2>
+        <span>Admin productivity</span>
+      </div>
+      <div class="healon-actions">
+        {% for action in healon_dashboard.quick_actions %}
+          <a href="{{ action.url }}"><i class="{{ action.icon }}"></i>{{ action.label }}</a>
+        {% endfor %}
+      </div>
+    </article>
+
+    <article class="healon-panel">
+      <div class="healon-panel-head">
+        <h2>Attendance Summary</h2>
+        <span>Today</span>
+      </div>
+      <div class="healon-summary">
+        <div><strong>{{ healon_dashboard.attendance_summary.present }}</strong><span>Present</span></div>
+        <div><strong>{{ healon_dashboard.attendance_summary.absent }}</strong><span>Absent</span></div>
+        <div><strong>{{ healon_dashboard.attendance_summary.total }}</strong><span>Total</span></div>
+      </div>
+    </article>
+  </div>
+
+  <div class="healon-grid healon-grid-lists">
+    <article class="healon-panel">
+      <div class="healon-panel-head">
+        <h2>Recent Activities</h2>
+        <span>Latest attendance logs</span>
+      </div>
+      <div class="healon-list">
+        {% for item in healon_dashboard.recent_activities %}
+          <a href="{% url 'admin:people_attendance_change' item.pk %}">
+            <span><strong>{{ item.user.get_full_name|default:item.user.username }}</strong>{{ item.get_event_type_display }}</span>
+            <time>{{ item.timestamp|date:"M d, H:i" }}</time>
+          </a>
+        {% empty %}
+          <p class="healon-empty">No recent attendance activity.</p>
+        {% endfor %}
+      </div>
+    </article>
+
+    <article class="healon-panel">
+      <div class="healon-panel-head">
+        <h2>Pending Approvals</h2>
+        <span>Leave requests</span>
+      </div>
+      <div class="healon-list">
+        {% for item in healon_dashboard.pending_approvals %}
+          <a href="{% url 'admin:people_leaverequest_change' item.pk %}">
+            <span><strong>{{ item.employee.get_full_name|default:item.employee.username }}</strong>{{ item.leave_type }}</span>
+            <time>{{ item.from_date|date:"M d" }} - {{ item.to_date|date:"M d" }}</time>
+          </a>
+        {% empty %}
+          <p class="healon-empty">No pending leave approvals.</p>
+        {% endfor %}
+      </div>
+    </article>
+
+    <article class="healon-panel">
+      <div class="healon-panel-head">
+        <h2>Open Support Tickets</h2>
+        <span>Employee support</span>
+      </div>
+      <div class="healon-list">
+        {% for item in healon_dashboard.open_tickets %}
+          <a href="{% url 'admin:people_helpdeskticket_change' item.pk %}">
+            <span><strong>{{ item.employee.get_full_name|default:item.employee.username }}</strong>{{ item.subject }}</span>
+            <time>{{ item.created_at|date:"M d" }}</time>
+          </a>
+        {% empty %}
+          <p class="healon-empty">No open support tickets.</p>
+        {% endfor %}
+      </div>
+    </article>
+  </div>
+
+  <article class="healon-panel healon-admin-map">
+    <div class="healon-panel-head">
+      <h2>HR Management Modules</h2>
+      <span>Grouped navigation</span>
+    </div>
+    <div class="healon-module-groups">
+      <div>
+        <h3>HR Management</h3>
+        <a href="{% url 'admin:auth_user_changelist' %}">Employees</a>
+        <a href="{% url 'admin:people_userprofile_changelist' %}">User Profiles</a>
+        <a href="{% url 'admin:people_assignedlocation_changelist' %}">Assigned Locations</a>
+      </div>
+      <div>
+        <h3>Attendance Management</h3>
+        <a href="{% url 'admin:people_attendance_changelist' %}">Attendances</a>
+        <a href="{% url 'admin:people_attendanceregularization_changelist' %}">Attendance Requests</a>
+      </div>
+      <div>
+        <h3>Payroll Management</h3>
+        <a href="{% url 'admin:people_salaryrecord_changelist' %}">Salary Records</a>
+        <a href="{% url 'admin:people_reimbursementrequest_changelist' %}">Reimbursement Requests</a>
+      </div>
+      <div>
+        <h3>Leave Management</h3>
+        <a href="{% url 'admin:people_leaverequest_changelist' %}">Leave Requests</a>
+        <a href="{% url 'admin:people_holiday_changelist' %}">Holidays</a>
+      </div>
+      <div>
+        <h3>Support Center</h3>
+        <a href="{% url 'admin:people_helpdeskticket_changelist' %}">Helpdesk Tickets</a>
+        <a href="{% url 'admin:people_passwordresetotp_changelist' %}">Password Reset Requests</a>
+      </div>
+      <div>
+        <h3>Organization</h3>
+        <a href="{% url 'admin:people_employeetask_changelist' %}">Employee Tasks</a>
+      </div>
+    </div>
+  </article>
+</section>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+{% endblock %}
