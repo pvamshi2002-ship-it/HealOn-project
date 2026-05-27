@@ -31,8 +31,17 @@ final String backendUrl = () {
 const Color _inkBlue = Color(0xFF172554);
 const Color _brandBlue = Color(0xFF2563EB);
 const Color _brandTeal = Color(0xFF10B981);
+const Color _medicalGreen = Color(0xFF1ABE8E);
+const Color _lightCyan = Color(0xFFE6FFFB);
 const Color _softSurface = Color(0xFFF8FAFC);
 const Color _lineColor = Color(0xFFE2E8F0);
+const Color _mutedText = Color(0xFF64748B);
+const Color _darkNavy = Color(0xFF07111F);
+const Color _darkPanel = Color(0xFF0F1B2D);
+
+final ValueNotifier<ThemeMode> _healOnThemeMode = ValueNotifier(
+  ThemeMode.light,
+);
 
 List<BoxShadow> _softShadow([double alpha = 0.08]) {
   return [
@@ -110,13 +119,102 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'HealOn Attendance',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(useMaterial3: true),
-      home: const HomePage(),
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: _healOnThemeMode,
+      builder: (context, themeMode, _) {
+        return MaterialApp(
+          title: 'HealOn Attendance',
+          debugShowCheckedModeBanner: false,
+          themeMode: themeMode,
+          theme: _buildHealOnTheme(isDark: false),
+          darkTheme: _buildHealOnTheme(isDark: true),
+          home: const HomePage(),
+        );
+      },
     );
   }
+}
+
+ThemeData _buildHealOnTheme({required bool isDark}) {
+  const inputRadius = 18.0;
+  final scheme = ColorScheme.fromSeed(
+    seedColor: _brandTeal,
+    brightness: isDark ? Brightness.dark : Brightness.light,
+    primary: isDark ? const Color(0xFF60A5FA) : _brandBlue,
+    secondary: isDark ? const Color(0xFF34D399) : _medicalGreen,
+    surface: isDark ? _darkPanel : Colors.white,
+  );
+  final fill = isDark ? const Color(0xFF111E31) : Colors.white;
+  final line = isDark
+      ? Colors.white.withValues(alpha: 0.12)
+      : const Color(0xFFE2E8F0);
+  return ThemeData(
+    useMaterial3: true,
+    brightness: isDark ? Brightness.dark : Brightness.light,
+    colorScheme: scheme,
+    scaffoldBackgroundColor: isDark ? _darkNavy : _softSurface,
+    fontFamily: 'Arial',
+    textTheme: (isDark ? ThemeData.dark() : ThemeData.light()).textTheme.apply(
+      bodyColor: isDark ? const Color(0xFFE5EEF9) : const Color(0xFF1E293B),
+      displayColor: isDark ? Colors.white : _inkBlue,
+    ),
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      fillColor: fill,
+      prefixIconColor: isDark ? const Color(0xFF94A3B8) : _mutedText,
+      suffixIconColor: isDark ? const Color(0xFF94A3B8) : _mutedText,
+      labelStyle: TextStyle(
+        color: isDark ? const Color(0xFFCBD5E1) : _mutedText,
+        fontWeight: FontWeight.w700,
+      ),
+      hintStyle: TextStyle(
+        color: (isDark ? Colors.white : _mutedText).withValues(alpha: 0.62),
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(inputRadius),
+        borderSide: BorderSide(color: line),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(inputRadius),
+        borderSide: BorderSide(color: line),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(inputRadius),
+        borderSide: BorderSide(color: scheme.primary, width: 1.7),
+      ),
+    ),
+    elevatedButtonTheme: ElevatedButtonThemeData(
+      style: ElevatedButton.styleFrom(
+        backgroundColor: _brandBlue,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        shadowColor: _brandBlue.withValues(alpha: 0.28),
+        padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        textStyle: const TextStyle(fontWeight: FontWeight.w900),
+      ),
+    ),
+    filledButtonTheme: FilledButtonThemeData(
+      style: FilledButton.styleFrom(
+        backgroundColor: _brandBlue,
+        foregroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      ),
+    ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: OutlinedButton.styleFrom(
+        foregroundColor: scheme.primary,
+        side: BorderSide(color: line),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      ),
+    ),
+    cardTheme: CardThemeData(
+      color: isDark ? _darkPanel : Colors.white,
+      elevation: 0,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+    ),
+  );
 }
 
 class HomePage extends StatefulWidget {
@@ -290,6 +388,7 @@ class _HomePageState extends State<HomePage> {
   bool _isDashboardLoading = false;
   String? _dashboardError;
   Map<String, Map<String, String>> _savedLoginDetails = {};
+  bool _isSidebarCollapsed = false;
 
   static const _savedLoginDetailsKey = 'healon_saved_login_details';
   static const _lastLoginUsernameKey = 'healon_last_login_username';
@@ -297,12 +396,34 @@ class _HomePageState extends State<HomePage> {
 
   bool get _isAdminRole => _selectedRole.trim().toLowerCase() == 'admin';
   bool get _isHrRole => _selectedRole.trim().toLowerCase() == 'hr';
+  bool get _isDarkMode => _healOnThemeMode.value == ThemeMode.dark;
+  String get _roleLabel => _isAdminRole
+      ? 'Admin'
+      : _isHrRole
+      ? 'HR'
+      : 'Employee';
 
   @override
   void initState() {
     super.initState();
     _loadSavedLoginDetails();
     _empIdCtrl.addListener(_handleLoginUsernameChanged);
+    for (final controller in [
+      _employeeDisplayNameCtrl,
+      _employeeFirstNameCtrl,
+      _employeeLastNameCtrl,
+      _employeeEmailCtrl,
+      _employeePhoneCtrl,
+      _employeeDepartmentCtrl,
+      _employeeDesignationCtrl,
+      _employeeUsernameCtrl,
+    ]) {
+      controller.addListener(_refreshEmployeePreview);
+    }
+  }
+
+  void _refreshEmployeePreview() {
+    if (mounted) setState(() {});
   }
 
   int _readInt(Map<String, dynamic>? map, String key) {
@@ -496,6 +617,18 @@ class _HomePageState extends State<HomePage> {
   void dispose() {
     _leaveSubmitSuccessTimer?.cancel();
     _empIdCtrl.removeListener(_handleLoginUsernameChanged);
+    for (final controller in [
+      _employeeDisplayNameCtrl,
+      _employeeFirstNameCtrl,
+      _employeeLastNameCtrl,
+      _employeeEmailCtrl,
+      _employeePhoneCtrl,
+      _employeeDepartmentCtrl,
+      _employeeDesignationCtrl,
+      _employeeUsernameCtrl,
+    ]) {
+      controller.removeListener(_refreshEmployeePreview);
+    }
     _empIdCtrl.dispose();
     _passCtrl.dispose();
     _resetMobileCtrl.dispose();
@@ -1218,26 +1351,62 @@ class _HomePageState extends State<HomePage> {
         child: Center(
           child: Material(
             color: Colors.transparent,
-            child: Container(
-              constraints: const BoxConstraints(maxWidth: 380),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                color: isError ? Colors.red : const Color(0xFF1ABE8E),
-                borderRadius: BorderRadius.circular(8),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.18),
-                    blurRadius: 16,
-                    offset: const Offset(0, 8),
+            child: TweenAnimationBuilder<double>(
+              tween: Tween(begin: 0.92, end: 1),
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              builder: (context, value, child) {
+                return Opacity(
+                  opacity: value.clamp(0.0, 1.0),
+                  child: Transform.scale(scale: value, child: child),
+                );
+              },
+              child: Container(
+                constraints: const BoxConstraints(maxWidth: 460),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 14,
+                ),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: isError
+                        ? const [Color(0xFFEF4444), Color(0xFFB91C1C)]
+                        : const [Color(0xFF10B981), Color(0xFF0F766E)],
                   ),
-                ],
-              ),
-              child: Text(
-                message,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w700,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.35),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: (isError ? Colors.red : _medicalGreen).withValues(
+                        alpha: 0.28,
+                      ),
+                      blurRadius: 28,
+                      offset: const Offset(0, 14),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      isError ? Icons.error_outline : Icons.verified_rounded,
+                      color: Colors.white,
+                      size: 22,
+                    ),
+                    const SizedBox(width: 10),
+                    Flexible(
+                      child: Text(
+                        message,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -3729,8 +3898,10 @@ class _HomePageState extends State<HomePage> {
       body: Row(
         children: [
           // Sidebar
-          Container(
-            width: 292,
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 260),
+            curve: Curves.easeOutCubic,
+            width: _isSidebarCollapsed ? 92 : 292,
             decoration: const BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
@@ -3748,10 +3919,11 @@ class _HomePageState extends State<HomePage> {
             child: Column(
               children: [
                 // Header
-                Container(
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 260),
                   width: double.infinity,
                   margin: const EdgeInsets.fromLTRB(16, 18, 16, 10),
-                  padding: const EdgeInsets.all(18),
+                  padding: EdgeInsets.all(_isSidebarCollapsed ? 10 : 18),
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(16),
@@ -3787,36 +3959,62 @@ class _HomePageState extends State<HomePage> {
                           color: Colors.white,
                         ),
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'HealOn',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 20,
-                                fontWeight: FontWeight.w900,
+                      if (!_isSidebarCollapsed) ...[
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'HealOn',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.w900,
+                                ),
                               ),
-                            ),
-                            const SizedBox(height: 3),
-                            Text(
-                              _isAdminRole
-                                  ? 'Admin Panel'
-                                  : _isHrRole
-                                  ? 'HR Panel'
-                                  : 'Employee Panel',
-                              style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.76),
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
+                              const SizedBox(height: 3),
+                              Text(
+                                'Healthcare Workforce Platform',
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: 0.76),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                ),
                               ),
-                            ),
-                          ],
+                              const SizedBox(height: 5),
+                              _buildStatusPill(
+                                '$_roleLabel Panel',
+                                color: _brandTeal,
+                                compact: true,
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
+                      ],
                     ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Align(
+                    alignment: _isSidebarCollapsed
+                        ? Alignment.center
+                        : Alignment.centerRight,
+                    child: IconButton.filledTonal(
+                      tooltip: _isSidebarCollapsed
+                          ? 'Expand sidebar'
+                          : 'Collapse sidebar',
+                      onPressed: () => setState(
+                        () => _isSidebarCollapsed = !_isSidebarCollapsed,
+                      ),
+                      icon: Icon(
+                        _isSidebarCollapsed
+                            ? Icons.keyboard_double_arrow_right
+                            : Icons.keyboard_double_arrow_left,
+                        size: 18,
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -4207,435 +4405,441 @@ class _HomePageState extends State<HomePage> {
           // Main Content
           Expanded(
             child: Container(
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
-                  colors: [Color(0xFFF8FAFC), Color(0xFFEFF6FF)],
+                  colors: _isDarkMode
+                      ? const [Color(0xFF07111F), Color(0xFF0F1B2D)]
+                      : const [Color(0xFFF8FAFC), Color(0xFFEFF6FF)],
                 ),
               ),
               child: DataTableTheme(
                 data: DataTableThemeData(
                   headingRowColor: WidgetStateProperty.all(
-                    const Color(0xFFF1F5F9),
+                    _isDarkMode
+                        ? const Color(0xFF132238)
+                        : const Color(0xFFF1F5F9),
                   ),
-                  headingTextStyle: const TextStyle(
-                    color: _inkBlue,
+                  dataRowColor: WidgetStateProperty.resolveWith((states) {
+                    if (states.contains(WidgetState.selected)) {
+                      return _brandBlue.withValues(alpha: 0.08);
+                    }
+                    if (states.contains(WidgetState.hovered)) {
+                      return _lightCyan.withValues(alpha: 0.7);
+                    }
+                    return _isDarkMode ? const Color(0xFF0F1B2D) : Colors.white;
+                  }),
+                  headingTextStyle: TextStyle(
+                    color: _isDarkMode ? Colors.white : _inkBlue,
                     fontWeight: FontWeight.w800,
                     letterSpacing: 0,
                   ),
-                  dataTextStyle: const TextStyle(
-                    color: Color(0xFF334155),
+                  dataTextStyle: TextStyle(
+                    color: _isDarkMode
+                        ? const Color(0xFFE2E8F0)
+                        : const Color(0xFF334155),
                     fontSize: 13,
                   ),
                   dividerThickness: 0.6,
                 ),
-                child: _isAdminRole
-                    ? _selectedMenu == 'Attendance'
-                          ? _buildAdminAttendanceView()
-                          : _selectedMenu == 'Employee Management'
-                          ? _selectedAttendanceSection == 'Add Employee'
-                                ? _buildEmployeeRegistrationView()
-                                : _buildAdminEmployeesView()
-                          : _selectedMenu == 'Smart Location Management'
-                          ? _buildSmartLocationManagementView()
-                          : _selectedMenu == 'Work Monitoring'
-                          ? _buildWorkMonitoringDashboard()
-                          : _selectedMenu == 'Total Employees'
-                          ? _buildTotalEmployeesDashboard()
-                          : _selectedMenu == 'Pending Requests'
-                          ? _buildPendingRequestsDashboard()
-                          : _selectedMenu == 'Helpdesk'
-                          ? _buildHelpdeskView()
-                          : _buildAdminDashboard()
-                    : _isHrRole
-                    ? _selectedMenu == 'Employee Management'
-                          ? _selectedAttendanceSection == 'Add Employee'
-                                ? _buildEmployeeRegistrationView()
-                                : _buildAdminEmployeesView()
-                          : _selectedMenu == 'Attendance'
-                          ? _buildAdminAttendanceView()
-                          : _selectedMenu == 'Employee Location'
-                          ? _buildSmartLocationManagementView()
-                          : _selectedMenu == 'Employee Payroll'
-                          ? _buildAdminReimbursementsView()
-                          : _selectedMenu == 'Leaves'
-                          ? _buildHrLeavesView()
-                          : _selectedMenu == 'Notifications'
-                          ? _buildHrNotificationsView()
-                          : _selectedMenu == 'Helpdesk'
-                          ? _buildHrHelpdeskDetail()
-                          : _selectedMenu == 'Dashboard'
-                          ? _buildHrDashboardView()
-                          : _buildHrSectionView()
-                    : _selectedMenu == 'Attendance'
-                    ? _buildAttendanceReportView()
-                    : _selectedMenu == 'Tasks'
-                    ? _buildTasksView()
-                    : _selectedMenu == 'Leaves'
-                    ? _buildLeavesView()
-                    : _selectedMenu == 'Salary'
-                    ? _buildSalaryView()
-                    : _selectedMenu == 'Helpdesk'
-                    ? _buildHelpdeskView()
-                    : Container(
-                        decoration: const BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [
-                              Color(0xFFFFF7FB),
-                              Color(0xFFF8FCFF),
-                              Color(0xFFCFF8F0),
-                              Color(0xFFEFF9FF),
-                              Color(0xFFFFFBFD),
-                            ],
-                            stops: [0.0, 0.24, 0.54, 0.78, 1.0],
+                child: _buildDashboardWorkspace(
+                  child: _isAdminRole
+                      ? _selectedMenu == 'Attendance'
+                            ? _buildAdminAttendanceView()
+                            : _selectedMenu == 'Employee Management'
+                            ? _selectedAttendanceSection == 'Add Employee'
+                                  ? _buildEmployeeRegistrationView()
+                                  : _buildAdminEmployeesView()
+                            : _selectedMenu == 'Smart Location Management'
+                            ? _buildSmartLocationManagementView()
+                            : _selectedMenu == 'Work Monitoring'
+                            ? _buildWorkMonitoringDashboard()
+                            : _selectedMenu == 'Total Employees'
+                            ? _buildTotalEmployeesDashboard()
+                            : _selectedMenu == 'Pending Requests'
+                            ? _buildPendingRequestsDashboard()
+                            : _selectedMenu == 'Helpdesk'
+                            ? _buildHelpdeskView()
+                            : _buildAdminDashboard()
+                      : _isHrRole
+                      ? _selectedMenu == 'Employee Management'
+                            ? _selectedAttendanceSection == 'Add Employee'
+                                  ? _buildEmployeeRegistrationView()
+                                  : _buildAdminEmployeesView()
+                            : _selectedMenu == 'Attendance'
+                            ? _buildAdminAttendanceView()
+                            : _selectedMenu == 'Employee Location'
+                            ? _buildSmartLocationManagementView()
+                            : _selectedMenu == 'Employee Payroll'
+                            ? _buildAdminReimbursementsView()
+                            : _selectedMenu == 'Leaves'
+                            ? _buildHrLeavesView()
+                            : _selectedMenu == 'Notifications'
+                            ? _buildHrNotificationsView()
+                            : _selectedMenu == 'Helpdesk'
+                            ? _buildHrHelpdeskDetail()
+                            : _selectedMenu == 'Dashboard'
+                            ? _buildHrDashboardView()
+                            : _buildHrSectionView()
+                      : _selectedMenu == 'Attendance'
+                      ? _buildAttendanceReportView()
+                      : _selectedMenu == 'Tasks'
+                      ? _buildTasksView()
+                      : _selectedMenu == 'Leaves'
+                      ? _buildLeavesView()
+                      : _selectedMenu == 'Salary'
+                      ? _buildSalaryView()
+                      : _selectedMenu == 'Helpdesk'
+                      ? _buildHelpdeskView()
+                      : Container(
+                          decoration: const BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [
+                                Color(0xFFFFF7FB),
+                                Color(0xFFF8FCFF),
+                                Color(0xFFCFF8F0),
+                                Color(0xFFEFF9FF),
+                                Color(0xFFFFFBFD),
+                              ],
+                              stops: [0.0, 0.24, 0.54, 0.78, 1.0],
+                            ),
                           ),
-                        ),
-                        child: SingleChildScrollView(
-                          padding: const EdgeInsets.all(32),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              // Welcome Section
-                              Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          'Welcome Back 👋',
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .bodyLarge
-                                              ?.copyWith(
-                                                color: Colors.grey[600],
-                                              ),
-                                        ),
-                                        const SizedBox(height: 8),
-                                        Text(
-                                          'User Dashboard - ${_currentUser?['name'] ?? 'Employee'}',
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .displaySmall
-                                              ?.copyWith(
-                                                color: const Color(0xFF1F2E5A),
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                        ),
-                                        const SizedBox(height: 8),
-                                        Text(
-                                          'Track your attendance, working hours and leave requests easily.',
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .bodyMedium
-                                              ?.copyWith(
-                                                color: Colors.grey[600],
-                                              ),
-                                        ),
-                                      ],
+                          child: SingleChildScrollView(
+                            padding: const EdgeInsets.all(32),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // Welcome Section
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            'Welcome Back 👋',
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .bodyLarge
+                                                ?.copyWith(
+                                                  color: Colors.grey[600],
+                                                ),
+                                          ),
+                                          const SizedBox(height: 8),
+                                          Text(
+                                            'User Dashboard - ${_currentUser?['name'] ?? 'Employee'}',
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .displaySmall
+                                                ?.copyWith(
+                                                  color: const Color(
+                                                    0xFF1F2E5A,
+                                                  ),
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                          ),
+                                          const SizedBox(height: 8),
+                                          Text(
+                                            'Track your attendance, working hours and leave requests easily.',
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .bodyMedium
+                                                ?.copyWith(
+                                                  color: Colors.grey[600],
+                                                ),
+                                          ),
+                                        ],
+                                      ),
                                     ),
+                                    IconButton.filled(
+                                      tooltip: 'Refresh dashboard',
+                                      onPressed: _isDashboardLoading
+                                          ? null
+                                          : refreshDashboardData,
+                                      style: IconButton.styleFrom(
+                                        backgroundColor: const Color(
+                                          0xFF2B5AF0,
+                                        ),
+                                        foregroundColor: Colors.white,
+                                        disabledBackgroundColor:
+                                            Colors.grey[300],
+                                      ),
+                                      icon: _isDashboardLoading
+                                          ? const SizedBox(
+                                              width: 18,
+                                              height: 18,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                                color: Colors.white,
+                                              ),
+                                            )
+                                          : const Icon(Icons.refresh),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 20),
+                                _buildWelcomeQuoteBanner(
+                                  _currentDisplayName('Employee'),
+                                  'User',
+                                ),
+                                const SizedBox(height: 32),
+                                if (_isDashboardLoading)
+                                  const LinearProgressIndicator()
+                                else if (_dashboardError != null)
+                                  _buildReportMessage(
+                                    icon: Icons.error_outline,
+                                    title: 'Dashboard not connected',
+                                    message: _dashboardError!,
+                                    actionLabel: 'Retry',
+                                    onAction: loadDashboardData,
                                   ),
-                                  IconButton.filled(
-                                    tooltip: 'Refresh dashboard',
-                                    onPressed: _isDashboardLoading
-                                        ? null
-                                        : refreshDashboardData,
-                                    style: IconButton.styleFrom(
-                                      backgroundColor: const Color(0xFF2B5AF0),
-                                      foregroundColor: Colors.white,
-                                      disabledBackgroundColor: Colors.grey[300],
-                                    ),
-                                    icon: _isDashboardLoading
-                                        ? const SizedBox(
-                                            width: 18,
-                                            height: 18,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 2,
+                                if (_isDashboardLoading ||
+                                    _dashboardError != null)
+                                  const SizedBox(height: 24),
+
+                                // Check In/Out Buttons
+                                Wrap(
+                                  spacing: 16,
+                                  runSpacing: 12,
+                                  children: [
+                                    ElevatedButton(
+                                      onPressed: checkIn,
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: _medicalGreen,
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 32,
+                                          vertical: 16,
+                                        ),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            18,
+                                          ),
+                                        ),
+                                      ),
+                                      child: const Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            Icons.camera_alt,
+                                            color: Colors.white,
+                                          ),
+                                          SizedBox(width: 8),
+                                          Text(
+                                            'Check In',
+                                            style: TextStyle(
+                                              fontSize: 16,
                                               color: Colors.white,
                                             ),
-                                          )
-                                        : const Icon(Icons.refresh),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    ElevatedButton(
+                                      onPressed: checkOut,
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: const Color(
+                                          0xFFEF4444,
+                                        ),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 32,
+                                          vertical: 16,
+                                        ),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            18,
+                                          ),
+                                        ),
+                                      ),
+                                      child: const Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            Icons.camera_alt,
+                                            color: Colors.white,
+                                          ),
+                                          SizedBox(width: 8),
+                                          Text(
+                                            'Check Out',
+                                            style: TextStyle(
+                                              fontSize: 16,
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                if (_lastAttendancePhotoBiometric != null) ...[
+                                  const SizedBox(height: 18),
+                                  _buildPhotoBiometricPreview(
+                                    'Latest captured biometric',
+                                    _lastAttendancePhotoBiometric!,
+                                    message: _lastAttendanceBiometricMessage,
                                   ),
                                 ],
-                              ),
-                              const SizedBox(height: 20),
-                              _buildWelcomeQuoteBanner(
-                                _currentDisplayName('Employee'),
-                                'User',
-                              ),
-                              const SizedBox(height: 32),
-                              if (_isDashboardLoading)
-                                const LinearProgressIndicator()
-                              else if (_dashboardError != null)
-                                _buildReportMessage(
-                                  icon: Icons.error_outline,
-                                  title: 'Dashboard not connected',
-                                  message: _dashboardError!,
-                                  actionLabel: 'Retry',
-                                  onAction: loadDashboardData,
-                                ),
-                              if (_isDashboardLoading ||
-                                  _dashboardError != null)
                                 const SizedBox(height: 24),
 
-                              // Check In/Out Buttons
-                              Row(
-                                children: [
-                                  ElevatedButton(
-                                    onPressed: checkIn,
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: const Color(0xFF1ABE8E),
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 32,
-                                        vertical: 16,
-                                      ),
-                                    ),
-                                    child: const Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(
-                                          Icons.camera_alt,
-                                          color: Colors.white,
-                                        ),
-                                        SizedBox(width: 8),
-                                        Text(
-                                          'Check In',
-                                          style: TextStyle(
-                                            fontSize: 16,
-                                            color: Colors.white,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  const SizedBox(width: 16),
-                                  ElevatedButton(
-                                    onPressed: checkOut,
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.red,
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 32,
-                                        vertical: 16,
-                                      ),
-                                    ),
-                                    child: const Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(
-                                          Icons.camera_alt,
-                                          color: Colors.white,
-                                        ),
-                                        SizedBox(width: 8),
-                                        Text(
-                                          'Check Out',
-                                          style: TextStyle(
-                                            fontSize: 16,
-                                            color: Colors.white,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              if (_lastAttendancePhotoBiometric != null) ...[
-                                const SizedBox(height: 18),
-                                _buildPhotoBiometricPreview(
-                                  'Latest captured biometric',
-                                  _lastAttendancePhotoBiometric!,
-                                  message: _lastAttendanceBiometricMessage,
+                                _buildHealthcareInsightsRow(
+                                  items: [
+                                    {
+                                      'title': 'Attendance status',
+                                      'value':
+                                          '${_readInt(_userSection('attendance'), 'present_days_this_month')} Days',
+                                      'icon': Icons.timeline_outlined,
+                                      'color': _medicalGreen,
+                                    },
+                                    {
+                                      'title': 'Leave balance',
+                                      'value':
+                                          '${_readInt(_userSection('leaves'), 'available')} Available',
+                                      'icon': Icons.event_available_outlined,
+                                      'color': Colors.orange,
+                                    },
+                                    {
+                                      'title': 'Task progress',
+                                      'value':
+                                          '${_readInt(_userSection('tasks'), 'assigned')} Assigned',
+                                      'icon': Icons.task_alt_outlined,
+                                      'color': _brandBlue,
+                                    },
+                                  ],
                                 ),
-                              ],
-                              const SizedBox(height: 48),
-                              Wrap(
-                                spacing: 16,
-                                runSpacing: 16,
-                                children: [
-                                  SizedBox(
-                                    width: 260,
-                                    child: _buildSummaryTile(
-                                      'Present Days',
-                                      _readInt(
-                                        _userSection('attendance'),
-                                        'present_days_this_month',
-                                      ).toString(),
-                                      Icons.event_available,
-                                      const Color(0xFF1ABE8E),
-                                      isCompact: true,
-                                    ),
-                                  ),
-                                  SizedBox(
-                                    width: 260,
-                                    child: _buildSummaryTile(
-                                      'Leave Balance',
-                                      _readInt(
-                                        _userSection('leaves'),
-                                        'available',
-                                      ).toString(),
-                                      Icons.event_note,
-                                      Colors.orange,
-                                      isCompact: true,
-                                    ),
-                                  ),
-                                  SizedBox(
-                                    width: 260,
-                                    child: _buildSummaryTile(
-                                      'Leave Applied',
-                                      _readInt(
-                                        _userSection('leaves'),
-                                        'applied',
-                                      ).toString(),
-                                      Icons.pending_actions,
-                                      Colors.orange,
-                                      isCompact: true,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 24),
-                              _buildDashboardAnalyticsPanel(
-                                'User Dashboard - ${_currentUser?['name'] ?? 'Employee'}',
-                                [
-                                  {
-                                    'label': 'Present Days',
-                                    'value': _readInt(
-                                      _userSection('attendance'),
-                                      'present_days_this_month',
-                                    ),
-                                    'color': const Color(0xFF1ABE8E),
-                                  },
-                                  {
-                                    'label': 'Leave Balance',
-                                    'value': _readInt(
-                                      _userSection('leaves'),
-                                      'available',
-                                    ),
-                                    'color': Colors.orange,
-                                  },
-                                  {
-                                    'label': 'Leave Applied',
-                                    'value': _readInt(
-                                      _userSection('leaves'),
-                                      'applied',
-                                    ),
-                                    'color': Colors.orange,
-                                  },
-                                ],
-                              ),
-                              const SizedBox(height: 24),
-
-                              // Main Content Row
-                              Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  // Left - Upcoming Holidays
-                                  Expanded(
-                                    flex: 2,
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Row(
-                                          children: [
-                                            const Icon(
-                                              Icons.calendar_month,
-                                              size: 24,
-                                              color: Colors.red,
-                                            ),
-                                            const SizedBox(width: 8),
-                                            Text(
-                                              'Upcoming Holidays',
-                                              style: Theme.of(context)
-                                                  .textTheme
-                                                  .titleLarge
-                                                  ?.copyWith(
-                                                    fontWeight: FontWeight.bold,
-                                                  ),
-                                            ),
-                                          ],
-                                        ),
-                                        const SizedBox(height: 16),
-                                        ..._dashboardHolidayRows().map(
-                                          (holiday) => _buildHolidayCard(
-                                            holiday['name']!,
-                                            holiday['date']!,
+                                const SizedBox(height: 24),
+                                // Main Content Row
+                                Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    // Left - Upcoming Holidays
+                                    Expanded(
+                                      flex: 2,
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            children: [
+                                              const Icon(
+                                                Icons.calendar_month,
+                                                size: 24,
+                                                color: Colors.red,
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Text(
+                                                'Upcoming Holidays',
+                                                style: Theme.of(context)
+                                                    .textTheme
+                                                    .titleLarge
+                                                    ?.copyWith(
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                    ),
+                                              ),
+                                            ],
                                           ),
-                                        ),
-                                      ],
+                                          const SizedBox(height: 16),
+                                          ..._dashboardHolidayRows().map(
+                                            (holiday) => _buildHolidayCard(
+                                              holiday['name']!,
+                                              holiday['date']!,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
                                     ),
-                                  ),
-                                  const SizedBox(width: 32),
-                                  // Right - Cards
-                                  Expanded(
-                                    flex: 1,
-                                    child: Column(
-                                      children: [
-                                        _buildDashboardCard(
-                                          'Work Assigned',
-                                          '${_readInt(_userSection('tasks'), 'assigned')} Pending Tasks',
-                                          Icons.work_outline,
-                                          const Color(0xFF2B5AF0),
-                                        ),
-                                        const SizedBox(height: 24),
-                                        _buildDashboardCard(
-                                          'Review Tasks',
-                                          '${_readInt(_userSection('tasks'), 'review_pending')} Reviews Pending',
-                                          Icons.assignment_turned_in,
-                                          Colors.orange,
-                                        ),
-                                      ],
+                                    const SizedBox(width: 32),
+                                    // Right - Cards
+                                    Expanded(
+                                      flex: 1,
+                                      child: Column(
+                                        children: [
+                                          _buildDashboardCard(
+                                            'Work Assigned',
+                                            '${_readInt(_userSection('tasks'), 'assigned')} Pending Tasks',
+                                            Icons.work_outline,
+                                            const Color(0xFF2B5AF0),
+                                          ),
+                                          const SizedBox(height: 24),
+                                          _buildDashboardCard(
+                                            'Review Tasks',
+                                            '${_readInt(_userSection('tasks'), 'review_pending')} Reviews Pending',
+                                            Icons.assignment_turned_in,
+                                            Colors.orange,
+                                          ),
+                                        ],
+                                      ),
                                     ),
-                                  ),
-                                ],
-                              ),
+                                  ],
+                                ),
 
-                              // Status Message
-                              if (_status.isNotEmpty) ...[
-                                const SizedBox(height: 32),
-                                Container(
-                                  padding: const EdgeInsets.all(12),
-                                  decoration: BoxDecoration(
-                                    color:
-                                        _status.contains('Check-in') ||
-                                            _status.contains('Check-out')
-                                        ? Colors.green[50]
-                                        : Colors.red[50],
-                                    border: Border.all(
+                                // Status Message
+                                if (_status.isNotEmpty) ...[
+                                  const SizedBox(height: 32),
+                                  Container(
+                                    padding: const EdgeInsets.all(12),
+                                    decoration: BoxDecoration(
                                       color:
                                           _status.contains('Check-in') ||
                                               _status.contains('Check-out')
-                                          ? Colors.green[300]!
-                                          : Colors.red[300]!,
+                                          ? Colors.green[50]
+                                          : Colors.red[50],
+                                      border: Border.all(
+                                        color:
+                                            _status.contains('Check-in') ||
+                                                _status.contains('Check-out')
+                                            ? Colors.green[300]!
+                                            : Colors.red[300]!,
+                                      ),
+                                      borderRadius: BorderRadius.circular(8),
                                     ),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Text(
-                                    _status,
-                                    style: TextStyle(
-                                      color:
-                                          _status.contains('Check-in') ||
-                                              _status.contains('Check-out')
-                                          ? Colors.green[700]
-                                          : Colors.red[700],
+                                    child: Text(
+                                      _status,
+                                      style: TextStyle(
+                                        color:
+                                            _status.contains('Check-in') ||
+                                                _status.contains('Check-out')
+                                            ? Colors.green[700]
+                                            : Colors.red[700],
+                                      ),
                                     ),
                                   ),
-                                ),
+                                ],
                               ],
-                            ],
+                            ),
                           ),
                         ),
-                      ),
+                ),
               ),
             ),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildDashboardWorkspace({required Widget child}) {
+    return Column(
+      children: [
+        Expanded(
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 240),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
+            child: KeyedSubtree(
+              key: ValueKey(
+                '$_selectedMenu-$_selectedAttendanceSection-$_selectedLeaveSection-$_selectedSalarySection-$_selectedHrSection-$_selectedHrPayrollSection',
+              ),
+              child: child,
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -6814,6 +7018,7 @@ class _HomePageState extends State<HomePage> {
           maxLines: 2,
           decoration: _leaveInputDecoration(
             hintText: 'Write a short reason for leave',
+            prefixIcon: const Icon(Icons.edit_note_outlined, size: 20),
           ),
         ),
       ],
@@ -7062,19 +7267,27 @@ class _HomePageState extends State<HomePage> {
       suffixIcon: suffixIcon,
       isDense: true,
       filled: true,
-      fillColor: const Color(0xFFFCFCFD),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      fillColor: _isDarkMode ? const Color(0xFF111E31) : Colors.white,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
       border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(6),
-        borderSide: BorderSide(color: Colors.grey[300]!),
+        borderRadius: BorderRadius.circular(16),
+        borderSide: BorderSide(
+          color: _isDarkMode
+              ? Colors.white.withValues(alpha: 0.12)
+              : _lineColor,
+        ),
       ),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(6),
-        borderSide: BorderSide(color: Colors.grey[300]!),
+        borderRadius: BorderRadius.circular(16),
+        borderSide: BorderSide(
+          color: _isDarkMode
+              ? Colors.white.withValues(alpha: 0.12)
+              : _lineColor,
+        ),
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(6),
-        borderSide: const BorderSide(color: Color(0xFF2B5AF0)),
+        borderRadius: BorderRadius.circular(16),
+        borderSide: const BorderSide(color: _brandBlue, width: 1.6),
       ),
     );
   }
@@ -8893,22 +9106,23 @@ class _HomePageState extends State<HomePage> {
     return InputDecoration(
       labelText: label,
       hintText: hintText,
+      prefixIcon: label == null ? null : Icon(_iconForField(label), size: 20),
       suffixIcon: suffixIcon,
       isDense: true,
       filled: true,
-      fillColor: const Color(0xFFFCFCFD),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      fillColor: Colors.white,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
       border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(6),
-        borderSide: BorderSide(color: Colors.grey[300]!),
+        borderRadius: BorderRadius.circular(16),
+        borderSide: const BorderSide(color: _lineColor),
       ),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(6),
-        borderSide: BorderSide(color: Colors.grey[300]!),
+        borderRadius: BorderRadius.circular(16),
+        borderSide: const BorderSide(color: _lineColor),
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(6),
-        borderSide: const BorderSide(color: Color(0xFF2B5AF0)),
+        borderRadius: BorderRadius.circular(16),
+        borderSide: const BorderSide(color: _brandBlue, width: 1.6),
       ),
     );
   }
@@ -8919,19 +9133,19 @@ class _HomePageState extends State<HomePage> {
       prefixIcon: const Icon(Icons.report_problem_outlined),
       isDense: true,
       filled: true,
-      fillColor: const Color(0xFFFCFCFD),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      fillColor: Colors.white,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
       border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(6),
-        borderSide: BorderSide(color: Colors.grey[300]!),
+        borderRadius: BorderRadius.circular(16),
+        borderSide: const BorderSide(color: _lineColor),
       ),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(6),
-        borderSide: BorderSide(color: Colors.grey[300]!),
+        borderRadius: BorderRadius.circular(16),
+        borderSide: const BorderSide(color: _lineColor),
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(6),
-        borderSide: const BorderSide(color: Color(0xFF2B5AF0)),
+        borderRadius: BorderRadius.circular(16),
+        borderSide: const BorderSide(color: _brandBlue, width: 1.6),
       ),
     );
   }
@@ -9228,6 +9442,29 @@ class _HomePageState extends State<HomePage> {
             ),
           if (_isDashboardLoading || _dashboardError != null)
             const SizedBox(height: 24),
+          _buildHealthcareInsightsRow(
+            items: [
+              {
+                'title': 'Shift coverage',
+                'value': '$presentToday Present',
+                'icon': Icons.health_and_safety_outlined,
+                'color': _medicalGreen,
+              },
+              {
+                'title': 'Leave monitoring',
+                'value': '$todaysLeaves Leaves',
+                'icon': Icons.event_note_outlined,
+                'color': Colors.teal,
+              },
+              {
+                'title': 'Workforce roster',
+                'value': '$totalEmployees Staff',
+                'icon': Icons.badge_outlined,
+                'color': _brandBlue,
+              },
+            ],
+          ),
+          const SizedBox(height: 24),
           GridView.extent(
             maxCrossAxisExtent: 280,
             shrinkWrap: true,
@@ -9277,24 +9514,6 @@ class _HomePageState extends State<HomePage> {
             ],
           ),
           const SizedBox(height: 24),
-          _buildDashboardAnalyticsPanel('HR Dashboard', [
-            {
-              'label': 'Total Employees',
-              'value': totalEmployees,
-              'color': const Color(0xFF2B5AF0),
-            },
-            {
-              'label': 'Present Today',
-              'value': presentToday,
-              'color': const Color(0xFF1ABE8E),
-            },
-            {
-              'label': 'Absent Today',
-              'value': absentToday,
-              'color': Colors.red,
-            },
-            {'label': 'Leaves', 'value': todaysLeaves, 'color': Colors.teal},
-          ]),
         ],
       ),
     );
@@ -10431,7 +10650,7 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildStatusPill(String status, {Color? color}) {
+  Widget _buildStatusPill(String status, {Color? color, bool compact = false}) {
     final positiveStatuses = ['Present', 'Active', 'Approved'];
     final negativeStatuses = ['Absent', 'Inactive', 'Rejected'];
     final pillColor =
@@ -10442,7 +10661,10 @@ class _HomePageState extends State<HomePage> {
             ? Colors.red
             : Colors.orange);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 8 : 10,
+        vertical: compact ? 4 : 6,
+      ),
       decoration: BoxDecoration(
         color: pillColor.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(999),
@@ -10453,88 +10675,8 @@ class _HomePageState extends State<HomePage> {
         style: TextStyle(
           color: pillColor,
           fontWeight: FontWeight.w800,
-          fontSize: 12,
+          fontSize: compact ? 10 : 12,
         ),
-      ),
-    );
-  }
-
-  Widget _buildDashboardAnalyticsPanel(
-    String title,
-    List<Map<String, Object>> items,
-  ) {
-    final maxValue = items.fold<int>(1, (current, item) {
-      final value = item['value'] as int? ?? 0;
-      return value > current ? value : current;
-    });
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: _lineColor),
-        boxShadow: _softShadow(0.06),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              color: _inkBlue,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          const SizedBox(height: 18),
-          ...items.map((item) {
-            final label = item['label'] as String? ?? '';
-            final value = item['value'] as int? ?? 0;
-            final color = item['color'] as Color? ?? _brandBlue;
-            final ratio = maxValue == 0 ? 0.0 : value / maxValue;
-
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          label,
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(
-                                color: const Color(0xFF475569),
-                                fontWeight: FontWeight.w700,
-                              ),
-                        ),
-                      ),
-                      Text(
-                        value.toString(),
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: _inkBlue,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(999),
-                    child: LinearProgressIndicator(
-                      minHeight: 8,
-                      value: ratio.clamp(0.0, 1.0),
-                      color: color,
-                      backgroundColor: color.withValues(alpha: 0.12),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          }),
-        ],
       ),
     );
   }
@@ -10607,6 +10749,30 @@ class _HomePageState extends State<HomePage> {
           if (_isDashboardLoading || _dashboardError != null)
             const SizedBox(height: 24),
 
+          _buildHealthcareInsightsRow(
+            items: [
+              {
+                'title': 'Workforce analytics',
+                'value': '${_readInt(summary, 'total_employees')} Employees',
+                'icon': Icons.groups_2_outlined,
+                'color': _brandBlue,
+              },
+              {
+                'title': 'Pending approvals',
+                'value': '${_adminPendingWorkItems().length} Requests',
+                'icon': Icons.pending_actions_outlined,
+                'color': Colors.orange,
+              },
+              {
+                'title': 'Payroll readiness',
+                'value': 'Healthcare HR',
+                'icon': Icons.account_balance_wallet_outlined,
+                'color': _medicalGreen,
+              },
+            ],
+          ),
+          const SizedBox(height: 24),
+
           GridView.count(
             crossAxisCount: 2,
             childAspectRatio: 2.4,
@@ -10641,18 +10807,6 @@ class _HomePageState extends State<HomePage> {
             ],
           ),
           const SizedBox(height: 24),
-          _buildDashboardAnalyticsPanel('Admin Dashboard', [
-            {
-              'label': 'Total Employees',
-              'value': _readInt(summary, 'total_employees'),
-              'color': const Color(0xFF2B5AF0),
-            },
-            {
-              'label': 'Total Requests',
-              'value': _readInt(summary, 'total_requests'),
-              'color': Colors.purple,
-            },
-          ]),
         ],
       ),
     );
@@ -11505,19 +11659,171 @@ class _HomePageState extends State<HomePage> {
   }) {
     return SizedBox(
       width: 246,
-      child: TextField(
-        controller: controller,
-        keyboardType: keyboardType,
-        obscureText: obscureText,
-        decoration: InputDecoration(
-          labelText: label,
-          border: const OutlineInputBorder(),
-          isDense: true,
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 12,
-            vertical: 10,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: _brandBlue.withValues(alpha: 0.05),
+              blurRadius: 18,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: TextField(
+          controller: controller,
+          keyboardType: keyboardType,
+          obscureText: obscureText,
+          decoration: _premiumInputDecoration(
+            label,
+            icon: _iconForField(label),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildHealthcareInsightsRow({
+    required List<Map<String, Object>> items,
+  }) {
+    return GridView.extent(
+      maxCrossAxisExtent: 330,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      mainAxisSpacing: 16,
+      crossAxisSpacing: 16,
+      childAspectRatio: 2.25,
+      children: items.map((item) {
+        return _buildInsightCard(
+          title: item['title'] as String,
+          value: item['value'] as String,
+          icon: item['icon'] as IconData,
+          color: item['color'] as Color,
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildInsightCard({
+    required String title,
+    required String value,
+    required IconData icon,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            _isDarkMode ? const Color(0xFF0F1B2D) : Colors.white,
+            color.withValues(alpha: _isDarkMode ? 0.18 : 0.08),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: _isDarkMode ? 0.10 : 1),
+        ),
+        boxShadow: _softShadow(_isDarkMode ? 0.18 : 0.06),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Icon(icon, color: color, size: 25),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    color: _isDarkMode ? Colors.white : _inkBlue,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: _isDarkMode ? const Color(0xFFCBD5E1) : _mutedText,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  IconData _iconForField(String label) {
+    final normalized = label.toLowerCase();
+    if (normalized.contains('email')) return Icons.alternate_email;
+    if (normalized.contains('phone') || normalized.contains('mobile')) {
+      return Icons.call_outlined;
+    }
+    if (normalized.contains('department')) return Icons.local_hospital_outlined;
+    if (normalized.contains('designation')) return Icons.badge_outlined;
+    if (normalized.contains('password')) return Icons.lock_outline;
+    if (normalized.contains('date') || normalized.contains('birth')) {
+      return Icons.calendar_today_outlined;
+    }
+    if (normalized.contains('username')) return Icons.account_circle_outlined;
+    if (normalized.contains('location') || normalized.contains('address')) {
+      return Icons.location_on_outlined;
+    }
+    if (normalized.contains('salary') ||
+        normalized.contains('bonus') ||
+        normalized.contains('tax') ||
+        normalized.contains('allowance') ||
+        normalized.contains('deduction') ||
+        normalized.contains('incentive')) {
+      return Icons.payments_outlined;
+    }
+    if (normalized.contains('reason') || normalized.contains('issue')) {
+      return Icons.edit_note_outlined;
+    }
+    return Icons.person_outline;
+  }
+
+  InputDecoration _premiumInputDecoration(
+    String label, {
+    IconData? icon,
+    String? hintText,
+    Widget? suffixIcon,
+  }) {
+    return InputDecoration(
+      labelText: label,
+      hintText: hintText,
+      prefixIcon: Icon(icon ?? _iconForField(label), size: 20),
+      suffixIcon: suffixIcon,
+      isDense: true,
+      filled: true,
+      fillColor: Colors.white,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: const BorderSide(color: _lineColor),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: const BorderSide(color: _brandBlue, width: 1.6),
       ),
     );
   }
@@ -11568,6 +11874,187 @@ class _HomePageState extends State<HomePage> {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildEmployeeRegistrationPreviewCard() {
+    final displayName = _employeeDisplayNameCtrl.text.trim().isNotEmpty
+        ? _employeeDisplayNameCtrl.text.trim()
+        : [
+            _employeeFirstNameCtrl.text.trim(),
+            _employeeLastNameCtrl.text.trim(),
+          ].where((part) => part.isNotEmpty).join(' ');
+    final name = displayName.isEmpty ? 'New Employee' : displayName;
+    final department = _employeeDepartmentCtrl.text.trim().isEmpty
+        ? 'Department'
+        : _employeeDepartmentCtrl.text.trim();
+    final designation = _employeeDesignationCtrl.text.trim().isEmpty
+        ? 'Designation'
+        : _employeeDesignationCtrl.text.trim();
+    final username = _employeeUsernameCtrl.text.trim().isEmpty
+        ? 'username'
+        : _employeeUsernameCtrl.text.trim();
+    final email = _employeeEmailCtrl.text.trim().isEmpty
+        ? 'email@healon.health'
+        : _employeeEmailCtrl.text.trim();
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Colors.white.withValues(alpha: 0.92),
+            _lightCyan.withValues(alpha: 0.82),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.8)),
+        boxShadow: _softShadow(0.08),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: const LinearGradient(
+                    colors: [_brandBlue, _medicalGreen],
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: _medicalGreen.withValues(alpha: 0.24),
+                      blurRadius: 22,
+                      offset: const Offset(0, 10),
+                    ),
+                  ],
+                ),
+                child: _employeeProfilePhotoBiometric?.isNotEmpty == true
+                    ? ClipOval(
+                        child: Image.network(
+                          _employeeProfilePhotoBiometric!,
+                          fit: BoxFit.cover,
+                        ),
+                      )
+                    : const Icon(
+                        Icons.person_add_alt_1_rounded,
+                        color: Colors.white,
+                        size: 32,
+                      ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        color: _inkBlue,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      username,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: _mutedText,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _buildStatusPill(department, color: _brandBlue),
+              _buildStatusPill(designation, color: _medicalGreen),
+              _buildStatusPill('Profile Preview', color: Colors.teal),
+            ],
+          ),
+          const SizedBox(height: 18),
+          _buildPreviewMetric(Icons.mail_outline, 'Email', email),
+          const SizedBox(height: 10),
+          _buildPreviewMetric(
+            Icons.verified_user_outlined,
+            'Access',
+            [
+              if (_employeeCanAccessUser) 'User',
+              if (_employeeCanAccessAdmin) 'Admin',
+              if (_employeeCanAccessHr) 'HR',
+            ].join(', '),
+          ),
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.78),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: _lineColor),
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.schedule_outlined,
+                  color: _medicalGreen,
+                  size: 20,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Attendance, payroll, leave, biometric and geofencing access remain unchanged.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: _mutedText,
+                      height: 1.35,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPreviewMetric(IconData icon, String label, String value) {
+    return Row(
+      children: [
+        Icon(icon, color: _brandBlue, size: 18),
+        const SizedBox(width: 9),
+        Text(
+          '$label: ',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: _mutedText,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value.isEmpty ? '-' : value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: _inkBlue,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -12083,7 +12570,6 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildAdminDailyAttendancesSection() {
-    final summary = _adminAttendance?['summary'] as Map<String, dynamic>?;
     final allRows = _adminAttendance?['rows'] as List<dynamic>? ?? [];
     final query = _adminAttendanceSearchCtrl.text.trim().toLowerCase();
     final rows = allRows.whereType<Map<String, dynamic>>().where((row) {
@@ -12105,34 +12591,6 @@ class _HomePageState extends State<HomePage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 620),
-            child: Row(
-              children: [
-                Expanded(
-                  child: _buildAdminStatCard(
-                    'Total Present',
-                    '${_readInt(summary, 'present')}/${_readInt(summary, 'total_employees')}',
-                    Icons.check_circle,
-                    const Color(0xFF1ABE8E),
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: _buildAdminStatCard(
-                    'Total Absent',
-                    _readInt(summary, 'absent').toString(),
-                    Icons.cancel,
-                    Colors.orange,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 32),
-
         Center(
           child: Text(
             "Today's Attendance",
@@ -12991,111 +13449,136 @@ class _HomePageState extends State<HomePage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
+          _buildSectionHeader(
             'Employee Registration',
-            style: Theme.of(context).textTheme.displaySmall?.copyWith(
-              fontWeight: FontWeight.bold,
-              color: const Color(0xFF1F2E5A),
-            ),
+            'Create a healthcare workforce profile with live verification preview.',
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 24),
 
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 800),
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.grey[200]!),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 12,
-                    children: [
-                      _buildCompactEditField(
-                        'Display Name',
-                        _employeeDisplayNameCtrl,
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final stacked = constraints.maxWidth < 980;
+              final form = Container(
+                padding: const EdgeInsets.all(22),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.94),
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(color: Colors.white),
+                  boxShadow: _softShadow(0.07),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Employee Details',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        color: _inkBlue,
+                        fontWeight: FontWeight.w900,
                       ),
-                      _buildCompactEditField(
-                        'First Name',
-                        _employeeFirstNameCtrl,
-                      ),
-                      _buildCompactEditField(
-                        'Last Name',
-                        _employeeLastNameCtrl,
-                      ),
-                      _buildCompactEditField(
-                        'Date of Birth (YYYY-MM-DD)',
-                        _employeeDobCtrl,
-                        keyboardType: TextInputType.datetime,
-                      ),
-                      _buildCompactEditField(
-                        'Employee Email',
-                        _employeeEmailCtrl,
-                        keyboardType: TextInputType.emailAddress,
-                      ),
-                      _buildCompactEditField(
-                        'Phone Number',
-                        _employeePhoneCtrl,
-                        keyboardType: TextInputType.phone,
-                      ),
-                      _buildCompactEditField(
-                        'Login Username',
-                        _employeeUsernameCtrl,
-                      ),
-                      _buildCompactEditField(
-                        'Login Password',
-                        _employeePasswordCtrl,
-                        obscureText: true,
-                      ),
-                      _buildCompactEditField(
-                        'Department',
-                        _employeeDepartmentCtrl,
-                      ),
-                      _buildCompactEditField(
-                        'Designation',
-                        _employeeDesignationCtrl,
-                      ),
-                      _buildEmployeePhotoCapturePanel(
-                        photo: _employeeProfilePhotoBiometric,
-                        onCapture: _captureEmployeeProfilePhoto,
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 18),
-                  _buildDashboardPermissionBoxes(
-                    canUser: _employeeCanAccessUser,
-                    canAdmin: _employeeCanAccessAdmin,
-                    canHr: _employeeCanAccessHr,
-                    onUserChanged: (value) =>
-                        setState(() => _employeeCanAccessUser = value ?? false),
-                    onAdminChanged: (value) => setState(
-                      () => _employeeCanAccessAdmin = value ?? false,
                     ),
-                    onHrChanged: (value) =>
-                        setState(() => _employeeCanAccessHr = value ?? false),
-                  ),
-                  const SizedBox(height: 18),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: ElevatedButton(
+                    const SizedBox(height: 18),
+                    Wrap(
+                      spacing: 14,
+                      runSpacing: 14,
+                      children: [
+                        _buildCompactEditField(
+                          'Display Name',
+                          _employeeDisplayNameCtrl,
+                        ),
+                        _buildCompactEditField(
+                          'First Name',
+                          _employeeFirstNameCtrl,
+                        ),
+                        _buildCompactEditField(
+                          'Last Name',
+                          _employeeLastNameCtrl,
+                        ),
+                        _buildCompactEditField(
+                          'Date of Birth (YYYY-MM-DD)',
+                          _employeeDobCtrl,
+                          keyboardType: TextInputType.datetime,
+                        ),
+                        _buildCompactEditField(
+                          'Employee Email',
+                          _employeeEmailCtrl,
+                          keyboardType: TextInputType.emailAddress,
+                        ),
+                        _buildCompactEditField(
+                          'Phone Number',
+                          _employeePhoneCtrl,
+                          keyboardType: TextInputType.phone,
+                        ),
+                        _buildCompactEditField(
+                          'Login Username',
+                          _employeeUsernameCtrl,
+                        ),
+                        _buildCompactEditField(
+                          'Login Password',
+                          _employeePasswordCtrl,
+                          obscureText: true,
+                        ),
+                        _buildCompactEditField(
+                          'Department',
+                          _employeeDepartmentCtrl,
+                        ),
+                        _buildCompactEditField(
+                          'Designation',
+                          _employeeDesignationCtrl,
+                        ),
+                        _buildEmployeePhotoCapturePanel(
+                          photo: _employeeProfilePhotoBiometric,
+                          onCapture: _captureEmployeeProfilePhoto,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    _buildDashboardPermissionBoxes(
+                      canUser: _employeeCanAccessUser,
+                      canAdmin: _employeeCanAccessAdmin,
+                      canHr: _employeeCanAccessHr,
+                      onUserChanged: (value) => setState(
+                        () => _employeeCanAccessUser = value ?? false,
+                      ),
+                      onAdminChanged: (value) => setState(
+                        () => _employeeCanAccessAdmin = value ?? false,
+                      ),
+                      onHrChanged: (value) =>
+                          setState(() => _employeeCanAccessHr = value ?? false),
+                    ),
+                    const SizedBox(height: 20),
+                    ElevatedButton.icon(
                       onPressed: _isEmployeeSaving ? null : _registerEmployee,
-                      child: _isEmployeeSaving
+                      icon: _isEmployeeSaving
                           ? const SizedBox(
                               width: 18,
                               height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
                             )
-                          : const Text('Register Employee'),
+                          : const Icon(Icons.person_add_alt_1),
+                      label: const Text('Register Employee'),
                     ),
-                  ),
+                  ],
+                ),
+              );
+              final preview = _buildEmployeeRegistrationPreviewCard();
+              if (stacked) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [form, const SizedBox(height: 18), preview],
+                );
+              }
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(flex: 7, child: form),
+                  const SizedBox(width: 22),
+                  Expanded(flex: 3, child: preview),
                 ],
-              ),
-            ),
+              );
+            },
           ),
         ],
       ),
@@ -13619,7 +14102,11 @@ class _HomePageState extends State<HomePage> {
       ),
       child: ListTile(
         dense: true,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+        horizontalTitleGap: _isSidebarCollapsed ? 0 : 12,
+        contentPadding: EdgeInsets.symmetric(
+          horizontal: _isSidebarCollapsed ? 12 : 14,
+          vertical: 4,
+        ),
         leading: Container(
           width: 34,
           height: 34,
@@ -13635,20 +14122,46 @@ class _HomePageState extends State<HomePage> {
             size: 19,
           ),
         ),
-        title: Text(
-          label,
-          style: TextStyle(
-            color: Colors.white,
-            fontWeight: isActive ? FontWeight.w800 : FontWeight.w600,
-            fontSize: 14,
-          ),
-        ),
+        title: _isSidebarCollapsed
+            ? null
+            : Text(
+                label,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: isActive ? FontWeight.w800 : FontWeight.w600,
+                  fontSize: 14,
+                ),
+              ),
+        trailing: !_isSidebarCollapsed && isActive
+            ? Container(
+                width: 5,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF6EE7B7),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              )
+            : null,
+        titleAlignment: ListTileTitleAlignment.center,
+        hoverColor: Colors.white.withValues(alpha: 0.08),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        visualDensity: _isSidebarCollapsed
+            ? VisualDensity.compact
+            : VisualDensity.standard,
+        minLeadingWidth: _isSidebarCollapsed ? 34 : null,
+        subtitle: null,
+        enabled: true,
+        selected: isActive,
+        selectedTileColor: Colors.transparent,
+        focusColor: Colors.white.withValues(alpha: 0.1),
+        mouseCursor: SystemMouseCursors.click,
         onTap: () => _selectMenu(menuKey),
       ),
     );
   }
 
   Widget _buildSubMenuItem(String label, bool isActive, VoidCallback onTap) {
+    if (_isSidebarCollapsed) return const SizedBox.shrink();
     return Container(
       margin: const EdgeInsets.only(left: 48, right: 12, top: 2, bottom: 2),
       decoration: BoxDecoration(
