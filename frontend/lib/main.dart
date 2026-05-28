@@ -456,11 +456,14 @@ class _HomePageState extends State<HomePage> {
   int? _selectedHrDashboardEmployeeId;
   int? _selectedAdminAttendanceEmployeeId;
   int? _selectedAdminReportEmployeeId;
+  DateTime _selectedAdminDailyAttendanceDate = DateTime.now();
   DateTime _selectedAdminAttendanceReportMonth = DateTime(
     DateTime.now().year,
     DateTime.now().month,
   );
   DateTime? _selectedAdminAttendanceReportDate;
+  DateTime? _selectedAdminAttendanceReportStartDate;
+  DateTime? _selectedAdminAttendanceReportEndDate;
   DateTime _selectedAdminTaskMonth = DateTime(
     DateTime.now().year,
     DateTime.now().month,
@@ -474,6 +477,7 @@ class _HomePageState extends State<HomePage> {
   String? _dashboardError;
   Map<String, Map<String, String>> _savedLoginDetails = {};
   bool _isSidebarCollapsed = false;
+  String _expandedSidebarMenu = 'Dashboard';
 
   static const _savedLoginDetailsKey = 'healon_saved_login_details';
   static const _lastLoginUsernameKey = 'healon_last_login_username';
@@ -3049,7 +3053,9 @@ class _HomePageState extends State<HomePage> {
 
       if (resp.statusCode == 200) {
         _showNotification(
-          'Location assigned successfully',
+          _locationAttendanceEnabled
+              ? 'Location Assigned Successfully'
+              : 'Location Disabled for Employee',
           duration: const Duration(seconds: 3),
         );
         setState(() => _showLocationAssignedPopup = true);
@@ -3185,6 +3191,11 @@ class _HomePageState extends State<HomePage> {
   Future<void> _loadAdminAttendanceReport() async {
     if (_token == null) return;
     final params = <String, String>{};
+    if (_selectedAdminAttendanceReportStartDate != null &&
+        _selectedAdminAttendanceReportEndDate != null) {
+      await _loadAdminAttendanceReportRange();
+      return;
+    }
     if (_selectedAdminAttendanceReportDate != null) {
       params['date'] = _dateKey(_selectedAdminAttendanceReportDate)!;
     } else {
@@ -3212,6 +3223,119 @@ class _HomePageState extends State<HomePage> {
           _responseMessage(resp, 'Unable to load attendance report'),
           isError: true,
         );
+      }
+    } catch (e) {
+      _showNotification('Unable to load attendance report: $e', isError: true);
+    }
+  }
+
+  Future<void> _loadAdminDailyAttendance() async {
+    if (_token == null) return;
+    final params = <String, String>{
+      'date': _dateQuery(_selectedAdminDailyAttendanceDate),
+    };
+    if (_selectedAdminAttendanceEmployeeId != null) {
+      params['employee_id'] = _selectedAdminAttendanceEmployeeId.toString();
+    }
+    final uri = Uri.parse(
+      '$backendUrl/api/admin/attendance/',
+    ).replace(queryParameters: params);
+    try {
+      final resp = await http.get(
+        uri,
+        headers: {'Authorization': 'Token $_token'},
+      );
+      if (resp.statusCode == 200) {
+        setState(() {
+          _adminAttendance = jsonDecode(resp.body) as Map<String, dynamic>;
+        });
+      } else {
+        _showNotification(
+          _responseMessage(resp, 'Unable to load daily attendance'),
+          isError: true,
+        );
+      }
+    } catch (e) {
+      _showNotification('Unable to load daily attendance: $e', isError: true);
+    }
+  }
+
+  Future<void> _loadAdminAttendanceReportRange() async {
+    final start = _selectedAdminAttendanceReportStartDate;
+    final end = _selectedAdminAttendanceReportEndDate;
+    if (_token == null || start == null || end == null) return;
+    if (_dateOnly(end).isBefore(_dateOnly(start))) {
+      _showNotification('End date cannot be before start date', isError: true);
+      return;
+    }
+
+    final rows = <Map<String, dynamic>>[];
+    var present = 0;
+    var absent = 0;
+    final seenMonths = <String>{};
+    var cursor = DateTime(start.year, start.month);
+    final lastMonth = DateTime(end.year, end.month);
+
+    try {
+      while (!cursor.isAfter(lastMonth)) {
+        final monthKey = '${cursor.year}-${cursor.month}';
+        if (seenMonths.add(monthKey)) {
+          final params = <String, String>{
+            'year': cursor.year.toString(),
+            'month': cursor.month.toString(),
+            if (_selectedAdminReportEmployeeId != null)
+              'employee_id': _selectedAdminReportEmployeeId.toString(),
+          };
+          final uri = Uri.parse(
+            '$backendUrl/api/admin/attendance/',
+          ).replace(queryParameters: params);
+          final resp = await http.get(
+            uri,
+            headers: {'Authorization': 'Token $_token'},
+          );
+          if (resp.statusCode != 200) {
+            _showNotification(
+              _responseMessage(resp, 'Unable to load attendance report'),
+              isError: true,
+            );
+            return;
+          }
+          final data = jsonDecode(resp.body) as Map<String, dynamic>;
+          final monthRows = (data['rows'] as List<dynamic>? ?? [])
+              .whereType<Map<String, dynamic>>()
+              .where((row) {
+                final rowDate = DateTime.tryParse(
+                  row['date']?.toString() ?? '',
+                );
+                if (rowDate == null) return false;
+                final date = _dateOnly(rowDate);
+                return !date.isBefore(_dateOnly(start)) &&
+                    !date.isAfter(_dateOnly(end));
+              });
+          for (final row in monthRows) {
+            rows.add(row);
+            if (row['status'] == 'Present') {
+              present += 1;
+            } else {
+              absent += 1;
+            }
+          }
+        }
+        cursor = DateTime(cursor.year, cursor.month + 1);
+      }
+      if (mounted) {
+        setState(() {
+          _adminAttendanceReport = {
+            'summary': {
+              'present': present,
+              'absent': absent,
+              'total_employees': _selectedAdminReportEmployeeId == null
+                  ? _adminEmployeeMaps().length
+                  : 1,
+            },
+            'rows': rows,
+          };
+        });
       }
     } catch (e) {
       _showNotification('Unable to load attendance report: $e', isError: true);
@@ -3250,9 +3374,40 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  bool _sidebarMenuHasSubmenus(String menuKey) {
+    return {
+      'Attendance',
+      'Tasks',
+      'Leaves',
+      'Salary',
+      'Employee Management',
+      'Employee Location',
+      'Smart Location Management',
+      'Employee Payroll',
+      'Work Monitoring',
+      'Helpdesk',
+      'Help Desk',
+      'Notifications',
+    }.contains(menuKey);
+  }
+
+  void _toggleSidebarMenu(String menuKey) {
+    if (!_sidebarMenuHasSubmenus(menuKey)) {
+      _selectMenu(menuKey);
+      return;
+    }
+    setState(() {
+      if (_isSidebarCollapsed) {
+        _isSidebarCollapsed = false;
+      }
+      _expandedSidebarMenu = _expandedSidebarMenu == menuKey ? '' : menuKey;
+    });
+  }
+
   void _selectMenu(String menuKey) {
     setState(() {
       _selectedMenu = menuKey;
+      _expandedSidebarMenu = menuKey;
       if (menuKey == 'Attendance') {
         _selectedAttendanceSection = 'Daily Attendance';
         _selectedAdminAttendanceSection = 'Daily Attendances';
@@ -3420,38 +3575,10 @@ class _HomePageState extends State<HomePage> {
         _selectedHrDashboardDetail = '';
         return;
       }
-      if (_selectedMenu == 'Attendance') {
-        _selectedAttendanceSection = 'Daily Attendance';
-        _selectedAdminAttendanceSection = 'Daily Attendances';
-      } else if (_selectedMenu == 'Tasks') {
-        _selectedTaskSection = 'Pending Tasks';
-      } else if (_selectedMenu == 'Leaves') {
-        _selectedLeaveSection = 'Apply Leave';
-      } else if (_selectedMenu == 'Salary') {
-        _selectedSalarySection = 'Payslips';
-      } else if (_selectedMenu == 'Employee Management') {
-        _selectedAttendanceSection = _isAdminRole
-            ? 'Edit Employee'
-            : 'Add Employee';
-        _selectedHrSection = _selectedAttendanceSection;
-      } else if (_selectedMenu == 'Smart Location Management' ||
-          _selectedMenu == 'Employee Location') {
-        _selectedAttendanceSection = _isAdminRole
-            ? 'Edit Location'
-            : 'Add Location';
-        _selectedHrSection = _selectedAttendanceSection;
-      } else if (_selectedMenu == 'Employee Payroll') {
-        _selectedHrPayrollSection = 'Reimbursement';
-      } else {
-        _selectedMenu = 'Dashboard';
-      }
+      _selectedMenu = 'Dashboard';
+      _expandedSidebarMenu = 'Dashboard';
     });
-    if (_selectedMenu == 'Attendance') {
-      loadAttendanceReport();
-    }
-    if (_selectedMenu == 'Employee Payroll') {
-      _loadAdminReimbursements();
-    }
+    loadDashboardData();
   }
 
   void _changeReportMonth(int monthDelta) {
@@ -4483,7 +4610,7 @@ class _HomePageState extends State<HomePage> {
                             'Attendance',
                           ),
 
-                          if (_selectedMenu == 'Attendance') ...[
+                          if (_expandedSidebarMenu == 'Attendance') ...[
                             _buildSubMenuItem(
                               'Daily Attendance',
                               _selectedAttendanceSection == 'Daily Attendance',
@@ -4508,7 +4635,7 @@ class _HomePageState extends State<HomePage> {
                             'Leaves',
                           ),
 
-                          if (_selectedMenu == 'Leaves') ...[
+                          if (_expandedSidebarMenu == 'Leaves') ...[
                             _buildSubMenuItem(
                               'Apply Leave',
                               _selectedLeaveSection == 'Apply Leave',
@@ -4528,13 +4655,19 @@ class _HomePageState extends State<HomePage> {
                             ),
                           ],
 
-                          // TASKS
                           _buildMenuItem('Tasks', Icons.task, 'Tasks'),
+                          if (_expandedSidebarMenu == 'Tasks') ...[
+                            _buildSubMenuItem(
+                              'Pending Tasks',
+                              _selectedTaskSection == 'Pending Tasks',
+                              () => _selectTaskSection('Pending Tasks'),
+                            ),
+                          ],
 
                           // SALARY
                           _buildMenuItem('Salary', Icons.payment, 'Salary'),
 
-                          if (_selectedMenu == 'Salary') ...[
+                          if (_expandedSidebarMenu == 'Salary') ...[
                             _buildSubMenuItem(
                               'Payslips',
                               _selectedSalarySection == 'Payslips',
@@ -4569,6 +4702,13 @@ class _HomePageState extends State<HomePage> {
                           ],
 
                           _buildMenuItem('Helpdesk', Icons.help, 'Helpdesk'),
+                          if (_expandedSidebarMenu == 'Helpdesk') ...[
+                            _buildSubMenuItem(
+                              'Help Desk',
+                              _selectedMenu == 'Helpdesk',
+                              () => _selectMenu('Helpdesk'),
+                            ),
+                          ],
                         ],
 
                         // ================= HR PANEL =================
@@ -4578,7 +4718,8 @@ class _HomePageState extends State<HomePage> {
                             Icons.groups,
                             'Employee Management',
                           ),
-                          if (_selectedMenu == 'Employee Management') ...[
+                          if (_expandedSidebarMenu ==
+                              'Employee Management') ...[
                             _buildSubMenuItem(
                               'Add Employee',
                               _selectedAttendanceSection == 'Add Employee',
@@ -4601,13 +4742,38 @@ class _HomePageState extends State<HomePage> {
                                 });
                               },
                             ),
+                            _buildSubMenuItem(
+                              'Delete Employee',
+                              _selectedAttendanceSection == 'Delete Employee',
+                              () {
+                                setState(() {
+                                  _selectedMenu = 'Employee Management';
+                                  _expandedSidebarMenu = 'Employee Management';
+                                  _selectedAttendanceSection =
+                                      'Delete Employee';
+                                  _selectedHrSection = 'Delete Employee';
+                                });
+                              },
+                            ),
+                            _buildSubMenuItem(
+                              'Employee List',
+                              _selectedAttendanceSection == 'Employee List',
+                              () {
+                                setState(() {
+                                  _selectedMenu = 'Employee Management';
+                                  _expandedSidebarMenu = 'Employee Management';
+                                  _selectedAttendanceSection = 'Employee List';
+                                  _selectedHrSection = 'Employee List';
+                                });
+                              },
+                            ),
                           ],
                           _buildMenuItem(
                             'Attendance',
                             Icons.access_time,
                             'Attendance',
                           ),
-                          if (_selectedMenu == 'Attendance') ...[
+                          if (_expandedSidebarMenu == 'Attendance') ...[
                             _buildSubMenuItem(
                               'Daily Attendance',
                               _selectedAttendanceSection == 'Daily Attendance',
@@ -4618,6 +4784,7 @@ class _HomePageState extends State<HomePage> {
                                       'Daily Attendance';
                                   _selectedHrSection = 'Daily Attendance';
                                 });
+                                _loadAdminDailyAttendance();
                               },
                             ),
                             _buildSubMenuItem(
@@ -4640,7 +4807,7 @@ class _HomePageState extends State<HomePage> {
                             Icons.location_on,
                             'Employee Location',
                           ),
-                          if (_selectedMenu == 'Employee Location') ...[
+                          if (_expandedSidebarMenu == 'Employee Location') ...[
                             _buildSubMenuItem(
                               'Add Location',
                               _selectedAttendanceSection == 'Add Location',
@@ -4669,7 +4836,7 @@ class _HomePageState extends State<HomePage> {
                             Icons.account_balance_wallet,
                             'Employee Payroll',
                           ),
-                          if (_selectedMenu == 'Employee Payroll') ...[
+                          if (_expandedSidebarMenu == 'Employee Payroll') ...[
                             _buildSubMenuItem(
                               'Reimbursement',
                               _selectedHrPayrollSection == 'Reimbursement',
@@ -4697,7 +4864,21 @@ class _HomePageState extends State<HomePage> {
                             Icons.notifications_active_outlined,
                             'Notifications',
                           ),
+                          if (_expandedSidebarMenu == 'Notifications') ...[
+                            _buildSubMenuItem(
+                              'Notifications',
+                              _selectedMenu == 'Notifications',
+                              () => _selectMenu('Notifications'),
+                            ),
+                          ],
                           _buildMenuItem('Helpdesk', Icons.help, 'Helpdesk'),
+                          if (_expandedSidebarMenu == 'Helpdesk') ...[
+                            _buildSubMenuItem(
+                              'Help Desk',
+                              _selectedMenu == 'Helpdesk',
+                              () => _selectMenu('Helpdesk'),
+                            ),
+                          ],
                         ],
 
                         // ================= ADMIN PANEL =================
@@ -4709,7 +4890,8 @@ class _HomePageState extends State<HomePage> {
                             'Employee Management',
                           ),
 
-                          if (_selectedMenu == 'Employee Management') ...[
+                          if (_expandedSidebarMenu ==
+                              'Employee Management') ...[
                             _buildSubMenuItem(
                               'Add Employee',
                               _selectedAttendanceSection == 'Add Employee',
@@ -4731,6 +4913,29 @@ class _HomePageState extends State<HomePage> {
                                 });
                               },
                             ),
+                            _buildSubMenuItem(
+                              'Delete Employee',
+                              _selectedAttendanceSection == 'Delete Employee',
+                              () {
+                                setState(() {
+                                  _selectedMenu = 'Employee Management';
+                                  _expandedSidebarMenu = 'Employee Management';
+                                  _selectedAttendanceSection =
+                                      'Delete Employee';
+                                });
+                              },
+                            ),
+                            _buildSubMenuItem(
+                              'Employee List',
+                              _selectedAttendanceSection == 'Employee List',
+                              () {
+                                setState(() {
+                                  _selectedMenu = 'Employee Management';
+                                  _expandedSidebarMenu = 'Employee Management';
+                                  _selectedAttendanceSection = 'Employee List';
+                                });
+                              },
+                            ),
                           ],
 
                           // SMART LOCATION MANAGEMENT
@@ -4740,7 +4945,8 @@ class _HomePageState extends State<HomePage> {
                             'Smart Location Management',
                           ),
 
-                          if (_selectedMenu == 'Smart Location Management') ...[
+                          if (_expandedSidebarMenu ==
+                              'Smart Location Management') ...[
                             _buildSubMenuItem(
                               'Add Location',
                               _selectedAttendanceSection == 'Add Location',
@@ -4770,7 +4976,7 @@ class _HomePageState extends State<HomePage> {
                             'Attendance',
                           ),
 
-                          if (_selectedMenu == 'Attendance') ...[
+                          if (_expandedSidebarMenu == 'Attendance') ...[
                             _buildSubMenuItem(
                               'Daily Attendance',
                               _selectedAttendanceSection == 'Daily Attendance',
@@ -4780,6 +4986,7 @@ class _HomePageState extends State<HomePage> {
                                   _selectedAttendanceSection =
                                       'Daily Attendance';
                                 });
+                                _loadAdminDailyAttendance();
                               },
                             ),
 
@@ -4804,8 +5011,29 @@ class _HomePageState extends State<HomePage> {
                             Icons.work,
                             'Work Monitoring',
                           ),
+                          if (_expandedSidebarMenu == 'Work Monitoring') ...[
+                            _buildSubMenuItem(
+                              'Work Monitoring',
+                              _selectedMenu == 'Work Monitoring',
+                              () {
+                                setState(() {
+                                  _selectedMenu = 'Work Monitoring';
+                                  _expandedSidebarMenu = 'Work Monitoring';
+                                  _selectedAdminTaskStatus = 'assigned';
+                                });
+                                _loadAdminTasks();
+                              },
+                            ),
+                          ],
 
                           _buildMenuItem('Helpdesk', Icons.help, 'Helpdesk'),
+                          if (_expandedSidebarMenu == 'Helpdesk') ...[
+                            _buildSubMenuItem(
+                              'Help Desk',
+                              _selectedMenu == 'Helpdesk',
+                              () => _selectMenu('Helpdesk'),
+                            ),
+                          ],
                         ],
                       ],
                     ),
@@ -9655,18 +9883,21 @@ class _HomePageState extends State<HomePage> {
             'Contact support for attendance, leave, salary, and account help.',
           ),
           const SizedBox(height: 22),
-          Row(
+          Wrap(
+            spacing: 16,
+            runSpacing: 16,
             children: [
-              Expanded(
+              SizedBox(
+                width: 360,
                 child: _buildContactTile(
-                  'Email ID',
+                  'Contact Email ID',
                   'pvamshi2002@gmail.com',
                   Icons.email_outlined,
                   const Color(0xFF2B5AF0),
                 ),
               ),
-              const SizedBox(width: 16),
-              Expanded(
+              SizedBox(
+                width: 360,
                 child: _buildContactTile(
                   'Contact Number',
                   '7867895432',
@@ -9678,8 +9909,9 @@ class _HomePageState extends State<HomePage> {
           ),
           const SizedBox(height: 24),
           Container(
-            width: 560,
-            padding: const EdgeInsets.all(16),
+            constraints: const BoxConstraints(maxWidth: 640),
+            width: double.infinity,
+            padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(8),
@@ -10900,16 +11132,25 @@ class _HomePageState extends State<HomePage> {
     Color color,
   ) {
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: Colors.grey[200]!),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Icon(icon, color: color, size: 34),
-          const SizedBox(width: 16),
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(icon, color: color, size: 24),
+          ),
+          const SizedBox(width: 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -10923,6 +11164,8 @@ class _HomePageState extends State<HomePage> {
                 const SizedBox(height: 6),
                 Text(
                   value,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     color: const Color(0xFF1F2E5A),
                     fontWeight: FontWeight.bold,
@@ -11849,51 +12092,12 @@ class _HomePageState extends State<HomePage> {
           const SizedBox(height: 32),
 
           ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 920),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _employeeSearchCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Search Employee',
-                      prefixIcon: Icon(Icons.search),
-                      border: OutlineInputBorder(),
-                      isDense: true,
-                    ),
-                    onChanged: (_) => setState(() {}),
-                  ),
-                ),
-                const SizedBox(width: 14),
-                SizedBox(
-                  width: 360,
-                  child: DropdownButtonFormField<int>(
-                    initialValue:
-                        employees.any(
-                          (employee) =>
-                              _employeeId(employee) == _selectedEditEmployeeId,
-                        )
-                        ? _selectedEditEmployeeId
-                        : null,
-                    decoration: const InputDecoration(
-                      labelText: 'Select Employee',
-                      border: OutlineInputBorder(),
-                      isDense: true,
-                    ),
-                    items: employees.map((employee) {
-                      return DropdownMenuItem<int>(
-                        value: _employeeId(employee),
-                        child: Text(
-                          _employeeDisplayName(employee),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      );
-                    }).toList(),
-                    onChanged: _selectEditEmployee,
-                  ),
-                ),
-              ],
+            constraints: const BoxConstraints(maxWidth: 460),
+            child: _buildCompactEmployeeSearch(
+              controller: _employeeSearchCtrl,
+              label: 'Search employee',
+              selectedEmployeeId: _selectedEditEmployeeId,
+              onSelected: _selectEditEmployee,
             ),
           ),
           if (selectedEmployee != null) ...[
@@ -13062,6 +13266,169 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  Widget _buildCompactEmployeeSearch({
+    required TextEditingController controller,
+    required String label,
+    required int? selectedEmployeeId,
+    required ValueChanged<int?> onSelected,
+  }) {
+    final query = controller.text.trim().toLowerCase();
+    Map<String, dynamic>? selectedEmployee;
+    for (final employee in _adminEmployeeMaps()) {
+      if (_employeeId(employee) == selectedEmployeeId) {
+        selectedEmployee = employee;
+        break;
+      }
+    }
+    final selectedLabel = selectedEmployee == null
+        ? ''
+        : _employeeDisplayName(selectedEmployee);
+    final showMatches =
+        query.length >= 2 &&
+        (selectedEmployee == null ||
+            controller.text.trim() != selectedLabel.trim());
+    final matches = showMatches
+        ? _adminEmployeeMaps()
+              .where((employee) => _employeeMatchesSearch(employee, query))
+              .take(8)
+              .toList()
+        : <Map<String, dynamic>>[];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextField(
+          controller: controller,
+          decoration: InputDecoration(
+            labelText: label,
+            prefixIcon: const Icon(Icons.search),
+            suffixIcon: selectedEmployeeId == null
+                ? null
+                : IconButton(
+                    tooltip: 'Clear employee',
+                    onPressed: () {
+                      controller.clear();
+                      onSelected(null);
+                    },
+                    icon: const Icon(Icons.close),
+                  ),
+            border: const OutlineInputBorder(),
+            isDense: true,
+          ),
+          onChanged: (value) {
+            if (selectedEmployeeId != null &&
+                value.trim() != selectedLabel.trim()) {
+              onSelected(null);
+            } else {
+              setState(() {});
+            }
+          },
+        ),
+        if (showMatches) ...[
+          const SizedBox(height: 8),
+          Container(
+            constraints: const BoxConstraints(maxHeight: 220),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFFE4EAF3)),
+              boxShadow: _softShadow(0.04),
+            ),
+            child: matches.isEmpty
+                ? const Padding(
+                    padding: EdgeInsets.all(14),
+                    child: Text(
+                      'No employees match your search.',
+                      style: TextStyle(
+                        color: _mutedText,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  )
+                : ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: matches.length,
+                    separatorBuilder: (context, index) =>
+                        const Divider(height: 1),
+                    itemBuilder: (context, index) {
+                      final employee = matches[index];
+                      return _buildCompactEmployeeSuggestion(
+                        employee,
+                        selectedEmployeeId: selectedEmployeeId,
+                        onSelected: (employeeId) {
+                          controller.text = _employeeDisplayName(employee);
+                          onSelected(employeeId);
+                        },
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  bool _employeeMatchesSearch(Map<String, dynamic> employee, String query) {
+    return [
+      employee['name'],
+      employee['employee_id'],
+      employee['username'],
+      employee['email'],
+      employee['department'],
+      employee['designation'],
+    ].any((value) => value?.toString().toLowerCase().contains(query) == true);
+  }
+
+  Widget _buildCompactEmployeeSuggestion(
+    Map<String, dynamic> employee, {
+    required int? selectedEmployeeId,
+    required ValueChanged<int?> onSelected,
+  }) {
+    final employeeId = _employeeId(employee);
+    final selected = employeeId == selectedEmployeeId;
+    return InkWell(
+      onTap: () => onSelected(employeeId),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        color: selected ? const Color(0xFFEFF6FF) : Colors.white,
+        child: Row(
+          children: [
+            _buildEmployeeAvatar(_employeeInitials(employee), size: 30),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _employeeDisplayName(employee),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: _inkBlue,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    employee['username']?.toString() ?? 'Employee',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: _mutedText,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildLocationAttendanceToggle() {
     return Row(
       children: [
@@ -13800,22 +14167,13 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildAdminDailyAttendancesSection() {
     final allRows = _adminAttendance?['rows'] as List<dynamic>? ?? [];
-    final query = _adminAttendanceSearchCtrl.text.trim().toLowerCase();
     final rows = allRows.whereType<Map<String, dynamic>>().where((row) {
       final rowEmployeeId = (row['employee_id'] as num?)?.toInt();
       if (_selectedAdminAttendanceEmployeeId != null &&
           rowEmployeeId != _selectedAdminAttendanceEmployeeId) {
         return false;
       }
-      if (query.isEmpty) return true;
-      final location = row['assigned_location'] as Map<String, dynamic>?;
-      return [
-        row['employee'],
-        row['username'],
-        row['check_in_location'],
-        row['check_out_location'],
-        location?['address'],
-      ].any((value) => value?.toString().toLowerCase().contains(query) == true);
+      return true;
     }).toList();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -13831,48 +14189,55 @@ class _HomePageState extends State<HomePage> {
         const SizedBox(height: 16),
         ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 920),
-          child: Row(
+          child: Wrap(
+            spacing: 14,
+            runSpacing: 12,
+            crossAxisAlignment: WrapCrossAlignment.start,
             children: [
-              Expanded(
-                child: DropdownButtonFormField<int?>(
-                  initialValue: _selectedAdminAttendanceEmployeeId,
-                  decoration: const InputDecoration(
-                    labelText: 'Employee',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                  items: [
-                    const DropdownMenuItem<int?>(
-                      value: null,
-                      child: Text('All Employees'),
-                    ),
-                    ..._adminEmployeeMaps().map((employee) {
-                      return DropdownMenuItem<int?>(
-                        value: _employeeId(employee),
-                        child: Text(
-                          _employeeDisplayName(employee),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      );
-                    }),
-                  ],
-                  onChanged: (value) {
-                    setState(() => _selectedAdminAttendanceEmployeeId = value);
+              SizedBox(
+                width: 320,
+                child: _buildCompactEmployeeSearch(
+                  controller: _adminAttendanceSearchCtrl,
+                  label: 'Search employee',
+                  selectedEmployeeId: _selectedAdminAttendanceEmployeeId,
+                  onSelected: (value) {
+                    setState(() {
+                      _selectedAdminAttendanceEmployeeId = value;
+                    });
+                    _loadAdminDailyAttendance();
                   },
                 ),
               ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: TextField(
-                  controller: _adminAttendanceSearchCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Search attendance',
-                    prefixIcon: Icon(Icons.search),
-                    border: OutlineInputBorder(),
-                    isDense: true,
+              SizedBox(
+                width: 230,
+                child: OutlinedButton.icon(
+                  onPressed: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: _selectedAdminDailyAttendanceDate,
+                      firstDate: DateTime(DateTime.now().year - 5),
+                      lastDate: DateTime(DateTime.now().year + 1),
+                    );
+                    if (picked != null) {
+                      setState(
+                        () => _selectedAdminDailyAttendanceDate = picked,
+                      );
+                      _loadAdminDailyAttendance();
+                    }
+                  },
+                  icon: const Icon(Icons.calendar_today),
+                  label: Text(
+                    _readableDate(
+                      _selectedAdminDailyAttendanceDate.toIso8601String(),
+                    ),
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  onChanged: (_) => setState(() {}),
                 ),
+              ),
+              ElevatedButton.icon(
+                onPressed: _loadAdminDailyAttendance,
+                icon: const Icon(Icons.search),
+                label: const Text('Search'),
               ),
             ],
           ),
@@ -14284,26 +14649,9 @@ class _HomePageState extends State<HomePage> {
   Widget _buildAdminAttendancesReportsSection() {
     final report = _adminAttendanceReport ?? _adminAttendance;
     final summary = report?['summary'] as Map<String, dynamic>?;
-    final query = _adminReportSearchCtrl.text.trim().toLowerCase();
     final rows = (report?['rows'] as List<dynamic>? ?? [])
         .whereType<Map<String, dynamic>>()
-        .where((row) {
-          if (query.isEmpty) return true;
-          final location = row['assigned_location'] as Map<String, dynamic>?;
-          return [
-            row['date'],
-            row['employee'],
-            row['username'],
-            row['check_in_location'],
-            row['check_out_location'],
-            location?['address'],
-          ].any(
-            (value) => value?.toString().toLowerCase().contains(query) == true,
-          );
-        })
         .toList();
-    final years = List<int>.generate(6, (index) => DateTime.now().year - index);
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -14327,61 +14675,13 @@ class _HomePageState extends State<HomePage> {
             runSpacing: 12,
             children: [
               SizedBox(
-                width: 170,
-                child: DropdownButtonFormField<int>(
-                  initialValue: _selectedAdminAttendanceReportMonth.year,
-                  decoration: const InputDecoration(
-                    labelText: 'Year',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                  items: years
-                      .map(
-                        (year) => DropdownMenuItem(
-                          value: year,
-                          child: Text(year.toString()),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: (value) {
-                    if (value == null) return;
-                    setState(() {
-                      _selectedAdminAttendanceReportDate = null;
-                      _selectedAdminAttendanceReportMonth = DateTime(
-                        value,
-                        _selectedAdminAttendanceReportMonth.month,
-                      );
-                    });
-                    _loadAdminAttendanceReport();
-                  },
-                ),
-              ),
-              SizedBox(
-                width: 190,
-                child: DropdownButtonFormField<int>(
-                  initialValue: _selectedAdminAttendanceReportMonth.month,
-                  decoration: const InputDecoration(
-                    labelText: 'Month',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                  items: List<int>.generate(12, (index) => index + 1)
-                      .map(
-                        (month) => DropdownMenuItem(
-                          value: month,
-                          child: Text(_monthName(month)),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: (value) {
-                    if (value == null) return;
-                    setState(() {
-                      _selectedAdminAttendanceReportDate = null;
-                      _selectedAdminAttendanceReportMonth = DateTime(
-                        _selectedAdminAttendanceReportMonth.year,
-                        value,
-                      );
-                    });
+                width: 300,
+                child: _buildCompactEmployeeSearch(
+                  controller: _adminReportSearchCtrl,
+                  label: 'Search employee',
+                  selectedEmployeeId: _selectedAdminReportEmployeeId,
+                  onSelected: (value) {
+                    setState(() => _selectedAdminReportEmployeeId = value);
                     _loadAdminAttendanceReport();
                   },
                 ),
@@ -14393,23 +14693,32 @@ class _HomePageState extends State<HomePage> {
                     final picked = await showDatePicker(
                       context: context,
                       initialDate:
-                          _selectedAdminAttendanceReportDate ?? DateTime.now(),
+                          _selectedAdminAttendanceReportStartDate ??
+                          DateTime.now(),
                       firstDate: DateTime(DateTime.now().year - 5),
                       lastDate: DateTime(DateTime.now().year + 1),
                     );
                     if (picked != null) {
-                      setState(
-                        () => _selectedAdminAttendanceReportDate = picked,
-                      );
+                      setState(() {
+                        _selectedAdminAttendanceReportDate = null;
+                        _selectedAdminAttendanceReportStartDate = picked;
+                        _selectedAdminAttendanceReportEndDate ??= picked;
+                        if (_selectedAdminAttendanceReportEndDate != null &&
+                            _selectedAdminAttendanceReportEndDate!.isBefore(
+                              picked,
+                            )) {
+                          _selectedAdminAttendanceReportEndDate = picked;
+                        }
+                      });
                       _loadAdminAttendanceReport();
                     }
                   },
-                  icon: const Icon(Icons.calendar_today),
+                  icon: const Icon(Icons.event),
                   label: Text(
-                    _selectedAdminAttendanceReportDate == null
-                        ? 'Select Date'
+                    _selectedAdminAttendanceReportStartDate == null
+                        ? 'Start Date'
                         : _readableDate(
-                            _selectedAdminAttendanceReportDate!
+                            _selectedAdminAttendanceReportStartDate!
                                 .toIso8601String(),
                           ),
                     overflow: TextOverflow.ellipsis,
@@ -14417,48 +14726,52 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
               SizedBox(
-                width: 280,
-                child: DropdownButtonFormField<int?>(
-                  initialValue: _selectedAdminReportEmployeeId,
-                  decoration: const InputDecoration(
-                    labelText: 'Employee',
-                    border: OutlineInputBorder(),
-                    isDense: true,
+                width: 220,
+                child: OutlinedButton.icon(
+                  onPressed: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate:
+                          _selectedAdminAttendanceReportEndDate ??
+                          _selectedAdminAttendanceReportStartDate ??
+                          DateTime.now(),
+                      firstDate: DateTime(DateTime.now().year - 5),
+                      lastDate: DateTime(DateTime.now().year + 1),
+                    );
+                    if (picked != null) {
+                      setState(() {
+                        _selectedAdminAttendanceReportDate = null;
+                        _selectedAdminAttendanceReportEndDate = picked;
+                        _selectedAdminAttendanceReportStartDate ??= picked;
+                      });
+                      _loadAdminAttendanceReport();
+                    }
+                  },
+                  icon: const Icon(Icons.event_available),
+                  label: Text(
+                    _selectedAdminAttendanceReportEndDate == null
+                        ? 'End Date'
+                        : _readableDate(
+                            _selectedAdminAttendanceReportEndDate!
+                                .toIso8601String(),
+                          ),
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  items: [
-                    const DropdownMenuItem<int?>(
-                      value: null,
-                      child: Text('All Employees'),
-                    ),
-                    ..._adminEmployeeMaps().map((employee) {
-                      return DropdownMenuItem<int?>(
-                        value: _employeeId(employee),
-                        child: Text(
-                          _employeeDisplayName(employee),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      );
-                    }),
-                  ],
-                  onChanged: (value) {
-                    setState(() => _selectedAdminReportEmployeeId = value);
+                ),
+              ),
+              if (_selectedAdminAttendanceReportStartDate != null ||
+                  _selectedAdminAttendanceReportEndDate != null)
+                OutlinedButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      _selectedAdminAttendanceReportStartDate = null;
+                      _selectedAdminAttendanceReportEndDate = null;
+                    });
                     _loadAdminAttendanceReport();
                   },
+                  icon: const Icon(Icons.close),
+                  label: const Text('Clear Dates'),
                 ),
-              ),
-              SizedBox(
-                width: 260,
-                child: TextField(
-                  controller: _adminReportSearchCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Search',
-                    prefixIcon: Icon(Icons.search),
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                  onChanged: (_) => setState(() {}),
-                ),
-              ),
               ElevatedButton.icon(
                 onPressed: _loadAdminAttendanceReport,
                 icon: const Icon(Icons.search),
@@ -15705,7 +16018,6 @@ class _HomePageState extends State<HomePage> {
     final tasks = (_adminTasks?['tasks'] as List<dynamic>? ?? [])
         .whereType<Map<String, dynamic>>()
         .toList();
-    final years = List<int>.generate(6, (index) => DateTime.now().year - index);
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(32),
@@ -15791,64 +16103,6 @@ class _HomePageState extends State<HomePage> {
                       if (value == null) return;
                       setState(() => _selectedAdminTaskStatus = value);
                       _loadAdminTasks();
-                    },
-                  ),
-                ),
-                SizedBox(
-                  width: 160,
-                  child: DropdownButtonFormField<int>(
-                    initialValue: _selectedAdminTaskMonth.year,
-                    decoration: const InputDecoration(
-                      labelText: 'Year',
-                      border: OutlineInputBorder(),
-                      isDense: true,
-                    ),
-                    items: years
-                        .map(
-                          (year) => DropdownMenuItem(
-                            value: year,
-                            child: Text(year.toString()),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (value) {
-                      if (value == null) return;
-                      setState(() {
-                        _selectedAdminTaskDate = null;
-                        _selectedAdminTaskMonth = DateTime(
-                          value,
-                          _selectedAdminTaskMonth.month,
-                        );
-                      });
-                    },
-                  ),
-                ),
-                SizedBox(
-                  width: 185,
-                  child: DropdownButtonFormField<int>(
-                    initialValue: _selectedAdminTaskMonth.month,
-                    decoration: const InputDecoration(
-                      labelText: 'Month',
-                      border: OutlineInputBorder(),
-                      isDense: true,
-                    ),
-                    items: List<int>.generate(12, (index) => index + 1)
-                        .map(
-                          (month) => DropdownMenuItem(
-                            value: month,
-                            child: Text(_monthName(month)),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (value) {
-                      if (value == null) return;
-                      setState(() {
-                        _selectedAdminTaskDate = null;
-                        _selectedAdminTaskMonth = DateTime(
-                          _selectedAdminTaskMonth.year,
-                          value,
-                        );
-                      });
                     },
                   ),
                 ),
@@ -16190,7 +16444,9 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildMenuItem(String label, IconData icon, String menuKey) {
-    bool isActive = _selectedMenu == menuKey;
+    final hasSubmenus = _sidebarMenuHasSubmenus(menuKey);
+    final isExpanded = _expandedSidebarMenu == menuKey;
+    final isActive = !hasSubmenus && _selectedMenu == menuKey;
     return Padding(
       padding: EdgeInsets.symmetric(
         horizontal: _isSidebarCollapsed ? 9 : 12,
@@ -16200,7 +16456,7 @@ class _HomePageState extends State<HomePage> {
         color: Colors.transparent,
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
-          onTap: () => _selectMenu(menuKey),
+          onTap: () => _toggleSidebarMenu(menuKey),
           borderRadius: BorderRadius.circular(12),
           hoverColor: Colors.white.withValues(alpha: 0.08),
           splashColor: _brandTeal.withValues(alpha: 0.12),
@@ -16249,14 +16505,14 @@ class _HomePageState extends State<HomePage> {
                   width: 28,
                   height: 28,
                   decoration: BoxDecoration(
-                    color: isActive
+                    color: isActive || isExpanded
                         ? _brandTeal.withValues(alpha: 0.22)
                         : Colors.white.withValues(alpha: 0.07),
                     borderRadius: BorderRadius.circular(9),
                   ),
                   child: Icon(
                     icon,
-                    color: isActive
+                    color: isActive || isExpanded
                         ? const Color(0xFF86F7C8)
                         : Colors.white.withValues(alpha: 0.78),
                     size: 17,
@@ -16274,7 +16530,7 @@ class _HomePageState extends State<HomePage> {
                             ? Colors.white
                             : Colors.white.withValues(alpha: 0.76),
                         fontFamily: 'Inter',
-                        fontWeight: isActive
+                        fontWeight: isActive || isExpanded
                             ? FontWeight.w800
                             : FontWeight.w600,
                         fontSize: 12.5,
@@ -16282,15 +16538,27 @@ class _HomePageState extends State<HomePage> {
                       ),
                     ),
                   ),
-                  AnimatedContainer(
-                    duration: const Duration(milliseconds: 180),
-                    width: 4,
-                    height: isActive ? 22 : 0,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF86F7C8),
-                      borderRadius: BorderRadius.circular(999),
+                  if (hasSubmenus)
+                    AnimatedRotation(
+                      turns: isExpanded ? 0.5 : 0,
+                      duration: const Duration(milliseconds: 180),
+                      curve: Curves.easeOutCubic,
+                      child: Icon(
+                        Icons.expand_more,
+                        size: 18,
+                        color: Colors.white.withValues(alpha: 0.62),
+                      ),
+                    )
+                  else
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      width: 4,
+                      height: isActive ? 22 : 0,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF86F7C8),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
                     ),
-                  ),
                 ],
               ],
             ),
