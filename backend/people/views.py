@@ -128,6 +128,8 @@ def admin_managed_users():
 def map_url_for_attendance(attendance):
     if attendance is None:
         return ''
+    if not attendance.location_address and attendance.distance_meters is None:
+        return ''
     return f'https://www.google.com/maps?q={attendance.latitude},{attendance.longitude}'
 
 
@@ -167,6 +169,62 @@ def photo_biometric_details(photo_biometric):
 
 def validate_photo_biometric(value, label='Photo biometric'):
     details = photo_biometric_details(value)
+    if not details['verified']:
+        return details, f"{label} is required." if not value else details['message']
+    return details, ''
+
+
+def verification_attachment_details(value):
+    text = (value or '').strip()
+    if not text:
+        return {
+            'verified': False,
+            'message': 'Verification attachment missing.',
+            'mime_type': '',
+            'size_bytes': 0,
+        }
+    if text.startswith('data:image/'):
+        return photo_biometric_details(text)
+    allowed_mime_types = {
+        'application/pdf',
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    }
+    if not text.startswith('data:') or ',' not in text:
+        return {
+            'verified': False,
+            'message': 'Upload a photo, PDF, DOC, or DOCX verification file.',
+            'mime_type': '',
+            'size_bytes': 0,
+        }
+    header, _, payload = text.partition(',')
+    mime_type = header.removeprefix('data:').split(';')[0]
+    if mime_type not in allowed_mime_types:
+        return {
+            'verified': False,
+            'message': 'Upload a photo, PDF, DOC, or DOCX verification file.',
+            'mime_type': mime_type,
+            'size_bytes': 0,
+        }
+    try:
+        size_bytes = len(base64.b64decode(payload, validate=True))
+    except Exception:
+        return {
+            'verified': False,
+            'message': 'Verification file data is invalid.',
+            'mime_type': mime_type,
+            'size_bytes': 0,
+        }
+    return {
+        'verified': size_bytes > 0,
+        'message': 'Verification file uploaded.',
+        'mime_type': mime_type,
+        'size_bytes': size_bytes,
+    }
+
+
+def validate_verification_attachment(value, label='Employee verification file'):
+    details = verification_attachment_details(value)
     if not details['verified']:
         return details, f"{label} is required." if not value else details['message']
     return details, ''
@@ -791,19 +849,64 @@ class AttendanceEventView(APIView):
     event_type = Attendance.CHECK_IN
 
     def post(self, request):
-        serializer = AttendanceSerializer(data=request.data.copy())
+        assigned_location = getattr(request.user, 'assigned_location', None)
+        location_restricted = assigned_location is not None and assigned_location.is_active
+        data = request.data.copy()
+        if not location_restricted:
+            data.setdefault('latitude', '0')
+            data.setdefault('longitude', '0')
+        serializer = AttendanceSerializer(data=data)
         if serializer.is_valid():
-            assigned_location = getattr(request.user, 'assigned_location', None)
-            if assigned_location is None or not assigned_location.is_active:
+            profile = getattr(request.user, 'userprofile', None)
+            profile_photo = profile.profile_photo_biometric if profile else ''
+            _, profile_photo_error = validate_photo_biometric(
+                profile_photo,
+                'Registered employee photo',
+            )
+            if profile_photo_error:
                 return Response(
                     {
                         'detail': (
-                            'No active assigned attendance location is configured for this user. '
-                            'Please contact admin.'
+                            'Registered employee photo is required before '
+                            'check-in or check-out. Please contact admin.'
                         )
                     },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+
+            photo_biometric = (
+                serializer.validated_data.get('photo_biometric') or ''
+            ).strip()
+            biometric_details, biometric_error = validate_photo_biometric(
+                photo_biometric,
+                'Captured attendance photo',
+            )
+            if biometric_error:
+                return Response(
+                    {'detail': biometric_error},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if not location_restricted:
+                serializer.save(
+                    user=request.user,
+                    event_type=self.event_type,
+                    assigned_location=assigned_location,
+                    location_address='',
+                    distance_meters=None,
+                )
+                data = serializer.data
+                data['biometric_details'] = {
+                    **biometric_details,
+                    'registered_photo_verified': True,
+                    'location_restriction_enabled': False,
+                    'message': (
+                        'Photo biometric verified. Location restriction is disabled '
+                        'for this employee.'
+                    ),
+                }
+                return Response(data, status=status.HTTP_201_CREATED)
+
             today = timezone.localdate()
             if assigned_location.effective_from and today < assigned_location.effective_from:
                 return Response(
@@ -835,36 +938,6 @@ class AttendanceEventView(APIView):
                             'Please ask admin to update the full workplace address.'
                         )
                     },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            profile = getattr(request.user, 'userprofile', None)
-            profile_photo = profile.profile_photo_biometric if profile else ''
-            _, profile_photo_error = validate_photo_biometric(
-                profile_photo,
-                'Registered employee photo',
-            )
-            if profile_photo_error:
-                return Response(
-                    {
-                        'detail': (
-                            'Registered employee photo is required before '
-                            'check-in or check-out. Please contact admin.'
-                        )
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            photo_biometric = (
-                serializer.validated_data.get('photo_biometric') or ''
-            ).strip()
-            biometric_details, biometric_error = validate_photo_biometric(
-                photo_biometric,
-                'Captured attendance photo',
-            )
-            if biometric_error:
-                return Response(
-                    {'detail': biometric_error},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
@@ -1516,13 +1589,13 @@ class AdminEmployeesApiView(APIView):
                 {'detail': 'Display name, email, username, and password are required.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        _, profile_photo_error = validate_photo_biometric(
+        _, profile_photo_error = validate_verification_attachment(
             profile_photo_biometric,
-            'Employee verification photo',
+            'Employee verification file',
         )
         if profile_photo_error:
             return Response(
-                {'detail': 'Employee verification photo is required.'},
+                {'detail': profile_photo_error},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         date_of_birth = parse_date(date_of_birth_raw) if date_of_birth_raw else None
@@ -1697,9 +1770,9 @@ class AdminEmployeeDetailApiView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         if profile_photo_biometric:
-            _, profile_photo_error = validate_photo_biometric(
+            _, profile_photo_error = validate_verification_attachment(
                 profile_photo_biometric,
-                'Employee verification photo',
+                'Employee verification file',
             )
             if profile_photo_error:
                 return Response(

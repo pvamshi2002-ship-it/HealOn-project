@@ -66,6 +66,16 @@
     captureButton.style.display = 'none';
     setButtonStyle(captureButton, true);
 
+    var uploadInput = document.createElement('input');
+    uploadInput.type = 'file';
+    uploadInput.accept = 'image/*';
+    uploadInput.style.display = 'none';
+
+    var uploadButton = document.createElement('button');
+    uploadButton.type = 'button';
+    uploadButton.textContent = 'Upload Photo';
+    setButtonStyle(uploadButton, false);
+
     var recaptureButton = document.createElement('button');
     recaptureButton.type = 'button';
     recaptureButton.textContent = 'Recapture Photo';
@@ -73,8 +83,10 @@
     setButtonStyle(recaptureButton, false);
 
     actions.appendChild(startButton);
+    actions.appendChild(uploadButton);
     actions.appendChild(captureButton);
     actions.appendChild(recaptureButton);
+    wrapper.appendChild(uploadInput);
     wrapper.appendChild(video);
     wrapper.appendChild(preview);
     wrapper.appendChild(message);
@@ -150,6 +162,40 @@
 
     startButton.addEventListener('click', startCamera);
     recaptureButton.addEventListener('click', startCamera);
+
+    uploadButton.addEventListener('click', function () {
+      uploadInput.click();
+    });
+
+    uploadInput.addEventListener('change', function () {
+      var file = uploadInput.files && uploadInput.files[0];
+      if (!file) return;
+      if (!file.type || file.type.indexOf('image/') !== 0) {
+        message.textContent = 'Please upload an image file for employee verification.';
+        uploadInput.value = '';
+        return;
+      }
+
+      var reader = new FileReader();
+      reader.onload = function () {
+        var dataUrl = String(reader.result || '');
+        if (!dataUrl.startsWith('data:image/')) {
+          message.textContent = 'Uploaded file could not be read as an image.';
+          return;
+        }
+        stopCamera();
+        textarea.value = dataUrl;
+        preview.src = dataUrl;
+        message.textContent = 'Photo uploaded for check-in/check-out verification.';
+        showCapturedState();
+        uploadInput.value = '';
+        textarea.dispatchEvent(new Event('change', { bubbles: true }));
+      };
+      reader.onerror = function () {
+        message.textContent = 'Unable to read the uploaded photo. Please try again.';
+      };
+      reader.readAsDataURL(file);
+    });
 
     captureButton.addEventListener('click', function () {
       if (!video.videoWidth || !video.videoHeight) {

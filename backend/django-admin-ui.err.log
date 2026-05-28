@@ -239,3 +239,7 @@ Bad Request: /api/checkin/
 [27/May/2026 14:08:59] "GET /api/attendance-report/?month=2026-05 HTTP/1.1" 200 610
 D:\projects\healOn project\backend\people\admin.py changed, reloading.
 Watching for file changes with StatReloader
+D:\projects\healOn project\backend\people\views.py changed, reloading.
+Watching for file changes with StatReloader
+D:\projects\healOn project\backend\people\views.py changed, reloading.
+Watching for file changes with StatReloader

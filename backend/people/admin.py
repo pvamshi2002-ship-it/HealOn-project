@@ -109,9 +109,9 @@ class PhotoBiometricCaptureWidget(forms.Textarea):
 
 
 class HealOnUserCreationForm(UserCreationForm):
-    display_name = forms.CharField(max_length=300)
     first_name = forms.CharField(max_length=150, required=False)
     last_name = forms.CharField(max_length=150, required=False)
+    display_name = forms.CharField(max_length=300)
     email = forms.EmailField()
     employee_code = forms.CharField(max_length=30, required=False)
     mobile_number = forms.CharField(max_length=20, required=False)
@@ -119,7 +119,7 @@ class HealOnUserCreationForm(UserCreationForm):
         label='Employee verification photo',
         required=True,
         widget=PhotoBiometricCaptureWidget(),
-        help_text='Required for check-in/check-out photo verification. Capture the employee photo before saving.',
+        help_text='Required for check-in/check-out photo verification. Capture or upload the employee photo before saving.',
     )
     gender = forms.ChoiceField(
         choices=(('', '---------'), *UserProfile.GENDER_CHOICES),
@@ -135,10 +135,10 @@ class HealOnUserCreationForm(UserCreationForm):
     class Meta(UserCreationForm.Meta):
         model = User
         fields = (
-            'username',
-            'display_name',
             'first_name',
             'last_name',
+            'display_name',
+            'username',
             'email',
             'employee_code',
             'mobile_number',
@@ -205,6 +205,9 @@ class HealOnUserCreationForm(UserCreationForm):
             )
         return user
 
+    class Media:
+        js = ('people/admin_employee_form.js',)
+
 
 class HealOnUserChangeForm(forms.ModelForm):
     display_name = forms.CharField(max_length=300)
@@ -214,7 +217,7 @@ class HealOnUserChangeForm(forms.ModelForm):
         label='Employee verification photo',
         required=True,
         widget=PhotoBiometricCaptureWidget(),
-        help_text='Required for check-in/check-out photo verification. Capture or recapture the employee photo before saving.',
+        help_text='Required for check-in/check-out photo verification. Capture, recapture, or upload the employee photo before saving.',
     )
     gender = forms.ChoiceField(
         choices=(('', '---------'), *UserProfile.GENDER_CHOICES),
@@ -230,10 +233,10 @@ class HealOnUserChangeForm(forms.ModelForm):
     class Meta:
         model = User
         fields = (
-            'username',
-            'display_name',
             'first_name',
             'last_name',
+            'display_name',
+            'username',
             'email',
             'employee_code',
             'mobile_number',
@@ -281,6 +284,9 @@ class HealOnUserChangeForm(forms.ModelForm):
         ]):
             raise forms.ValidationError('Select at least one dashboard permission.')
         return cleaned_data
+
+    class Media:
+        js = ('people/admin_employee_form.js',)
 
 
 def extract_coordinates_from_map_url(value):
@@ -400,6 +406,16 @@ def resolve_map_url(value):
 
 
 class AssignedLocationAdminForm(forms.ModelForm):
+    is_active = forms.TypedChoiceField(
+        label='Location attendance',
+        choices=((True, 'Enable Location'), (False, 'Disable Location')),
+        coerce=lambda value: value in (True, 'True', 'true', '1', 1),
+        widget=forms.RadioSelect,
+        help_text=(
+            'Enable Location requires GPS radius validation for check-in and '
+            'check-out. Disable Location allows attendance with photo only.'
+        ),
+    )
     map_location = forms.CharField(
         label='Google Maps link',
         required=False,
@@ -427,6 +443,9 @@ class AssignedLocationAdminForm(forms.ModelForm):
             self.fields['map_url'].required = False
         if 'coordinates_resolved' in self.fields:
             self.fields['coordinates_resolved'].required = False
+        self.fields['radius_meters'].help_text = (
+            'Mandatory when Location attendance is enabled.'
+        )
         if self.instance and self.instance.pk:
             self.fields['map_location'].initial = self.instance.map_url
 
@@ -665,10 +684,10 @@ admin.site.unregister(User)
 
 
 USER_ADMIN_PROFILE_FIELDS = (
-    'username',
-    'display_name',
     'first_name',
     'last_name',
+    'display_name',
+    'username',
     'email',
     'employee_code',
     'mobile_number',

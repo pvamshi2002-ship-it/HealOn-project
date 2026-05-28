@@ -3,6 +3,13 @@
 import 'dart:async';
 import 'dart:html' as html;
 
+class VerificationUpload {
+  const VerificationUpload({required this.fileName, required this.dataUrl});
+
+  final String fileName;
+  final String dataUrl;
+}
+
 Future<String?> pickPhotoBiometric() async {
   final completer = Completer<String?>();
   html.MediaStream? stream;
@@ -119,5 +126,50 @@ Future<String?> pickPhotoBiometric() async {
     captureButton.disabled = true;
   }
 
+  return completer.future;
+}
+
+Future<VerificationUpload?> pickEmployeeVerificationUpload() async {
+  final completer = Completer<VerificationUpload?>();
+  final input = html.FileUploadInputElement()
+    ..accept =
+        'image/*,application/pdf,.pdf,.doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+  input.onChange.first.then((_) {
+    final file = input.files?.isNotEmpty == true ? input.files!.first : null;
+    if (file == null) {
+      completer.complete(null);
+      return;
+    }
+
+    final name = file.name.toLowerCase();
+    final allowed =
+        file.type.startsWith('image/') ||
+        file.type == 'application/pdf' ||
+        file.type == 'application/msword' ||
+        file.type ==
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+        name.endsWith('.pdf') ||
+        name.endsWith('.doc') ||
+        name.endsWith('.docx');
+    if (!allowed) {
+      completer.complete(null);
+      return;
+    }
+
+    final reader = html.FileReader();
+    reader.onLoad.first.then((_) {
+      final result = reader.result;
+      completer.complete(
+        result is String
+            ? VerificationUpload(fileName: file.name, dataUrl: result)
+            : null,
+      );
+    });
+    reader.onError.first.then((_) => completer.complete(null));
+    reader.readAsDataUrl(file);
+  });
+
+  input.click();
   return completer.future;
 }

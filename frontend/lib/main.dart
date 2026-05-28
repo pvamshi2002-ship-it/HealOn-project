@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart'
     show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 
@@ -82,6 +83,73 @@ class AttendanceReport {
           .toList(),
     );
   }
+}
+
+class _LocationMapPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final roadPaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.55)
+      ..strokeWidth = 18
+      ..strokeCap = StrokeCap.round;
+    final minorRoadPaint = Paint()
+      ..color = _brandBlue.withValues(alpha: 0.08)
+      ..strokeWidth = 2;
+    final clinicPaint = Paint()
+      ..color = _medicalGreen.withValues(alpha: 0.18)
+      ..style = PaintingStyle.fill;
+
+    for (var x = 28.0; x < size.width; x += 58) {
+      canvas.drawLine(
+        Offset(x, 0),
+        Offset(x + 34, size.height),
+        minorRoadPaint,
+      );
+    }
+    for (var y = 28.0; y < size.height; y += 52) {
+      canvas.drawLine(Offset(0, y), Offset(size.width, y + 12), minorRoadPaint);
+    }
+
+    final mainPath = Path()
+      ..moveTo(-20, size.height * 0.76)
+      ..cubicTo(
+        size.width * 0.24,
+        size.height * 0.62,
+        size.width * 0.54,
+        size.height * 0.92,
+        size.width + 28,
+        size.height * 0.58,
+      );
+    canvas.drawPath(mainPath, roadPaint);
+
+    final crossPath = Path()
+      ..moveTo(size.width * 0.16, -16)
+      ..cubicTo(
+        size.width * 0.28,
+        size.height * 0.34,
+        size.width * 0.7,
+        size.height * 0.44,
+        size.width * 0.84,
+        size.height + 18,
+      );
+    canvas.drawPath(crossPath, roadPaint);
+
+    final buildings = [
+      Rect.fromLTWH(size.width * 0.1, size.height * 0.15, 48, 32),
+      Rect.fromLTWH(size.width * 0.68, size.height * 0.18, 58, 38),
+      Rect.fromLTWH(size.width * 0.12, size.height * 0.58, 54, 34),
+      Rect.fromLTWH(size.width * 0.72, size.height * 0.66, 46, 30),
+    ];
+    for (final rect in buildings) {
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(rect, const Radius.circular(8)),
+        clinicPaint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class AttendanceReportDay {
@@ -234,6 +302,7 @@ class _HomePageState extends State<HomePage> {
   final _helpdeskIssueCtrl = TextEditingController();
   final _loginHelpdeskIssueCtrl = TextEditingController();
   final _employeeDisplayNameCtrl = TextEditingController();
+  final _employeeFullNameCtrl = TextEditingController();
   final _employeeFirstNameCtrl = TextEditingController();
   final _employeeLastNameCtrl = TextEditingController();
   final _employeeDobCtrl = TextEditingController();
@@ -243,6 +312,7 @@ class _HomePageState extends State<HomePage> {
   final _employeeDesignationCtrl = TextEditingController();
   final _employeeUsernameCtrl = TextEditingController();
   final _employeePasswordCtrl = TextEditingController();
+  final _employeeConfirmPasswordCtrl = TextEditingController();
   final _employeeSearchCtrl = TextEditingController();
   final _reimbursementReasonCtrl = TextEditingController();
   final _editEmployeeDisplayNameCtrl = TextEditingController();
@@ -257,9 +327,11 @@ class _HomePageState extends State<HomePage> {
   final _editEmployeePasswordCtrl = TextEditingController();
   final _adminAttendanceSearchCtrl = TextEditingController();
   final _adminReportSearchCtrl = TextEditingController();
+  final _locationNameCtrl = TextEditingController(text: 'Work Location');
   final _locationAddressCtrl = TextEditingController();
   final _locationMapLinkCtrl = TextEditingController();
   final _locationRadiusCtrl = TextEditingController(text: '100');
+  final _locationEmployeeSearchCtrl = TextEditingController();
   final _leaveCcCtrl = TextEditingController();
   final _leaveReasonCtrl = TextEditingController();
   final _regularizationCcCtrl = TextEditingController();
@@ -283,16 +355,27 @@ class _HomePageState extends State<HomePage> {
   bool _employeeCanAccessUser = true;
   bool _employeeCanAccessAdmin = false;
   bool _employeeCanAccessHr = false;
+  int _employeeRegistrationStep = 0;
+  bool _employeeFullNameEdited = false;
+  bool _employeeDisplayNameEdited = false;
+  bool _employeeUsernameEdited = false;
+  bool _employeePasswordVisible = false;
+  bool _employeeConfirmPasswordVisible = false;
+  String? _employeeGender;
   bool _editEmployeeCanAccessUser = true;
   bool _editEmployeeCanAccessAdmin = false;
   bool _editEmployeeCanAccessHr = false;
   bool _showLocationAssignedPopup = false;
+  bool _locationAttendanceEnabled = true;
   bool _showPassword = false;
+  bool _isLoginPasswordEyePressed = false;
   bool _rememberMe = false;
   bool _showLoginHelpdesk = false;
   bool _isApplyingSavedLogin = false;
   String? _employeeProfilePhotoBiometric;
+  String? _employeeProfileVerificationFileName;
   String? _editEmployeeProfilePhotoBiometric;
+  String? _editEmployeeProfileVerificationFileName;
   String? _lastAttendancePhotoBiometric;
   String? _lastAttendanceBiometricMessage;
   String? _passwordRefillUsername;
@@ -315,6 +398,8 @@ class _HomePageState extends State<HomePage> {
   bool _showLeaveSubmitSuccess = false;
   bool _isLeaveSubmitting = false;
   Timer? _leaveSubmitSuccessTimer;
+  Timer? _loginPasswordPeekTimer;
+  DateTime? _loginPasswordEyeDownAt;
   String _selectedLeaveOverview = 'Leave History';
   String _selectedSalarySection = 'Payslips';
   String _selectedPayslipMonth = _monthName(DateTime.now().month);
@@ -408,22 +493,138 @@ class _HomePageState extends State<HomePage> {
     super.initState();
     _loadSavedLoginDetails();
     _empIdCtrl.addListener(_handleLoginUsernameChanged);
+    _employeeFirstNameCtrl.addListener(_handleEmployeeNameChanged);
+    _employeeLastNameCtrl.addListener(_handleEmployeeNameChanged);
+    _employeeFullNameCtrl.addListener(_handleEmployeeFullNameChanged);
+    _employeeDisplayNameCtrl.addListener(_handleEmployeeDisplayNameChanged);
+    _employeeUsernameCtrl.addListener(_handleEmployeeUsernameChanged);
     for (final controller in [
       _employeeDisplayNameCtrl,
+      _employeeFullNameCtrl,
       _employeeFirstNameCtrl,
       _employeeLastNameCtrl,
+      _employeeDobCtrl,
       _employeeEmailCtrl,
       _employeePhoneCtrl,
       _employeeDepartmentCtrl,
       _employeeDesignationCtrl,
       _employeeUsernameCtrl,
+      _employeePasswordCtrl,
+      _employeeConfirmPasswordCtrl,
     ]) {
       controller.addListener(_refreshEmployeePreview);
     }
   }
 
+  void _handleEmployeeNameChanged() {
+    final fullName = [
+      _employeeFirstNameCtrl.text.trim(),
+      _employeeLastNameCtrl.text.trim(),
+    ].where((part) => part.isNotEmpty).join(' ');
+    if (!_employeeFullNameEdited && _employeeFullNameCtrl.text != fullName) {
+      _employeeFullNameCtrl.text = fullName;
+      _employeeFullNameCtrl.selection = TextSelection.collapsed(
+        offset: _employeeFullNameCtrl.text.length,
+      );
+    }
+    if (!_employeeDisplayNameEdited &&
+        _employeeDisplayNameCtrl.text != fullName) {
+      _employeeDisplayNameCtrl.text = fullName;
+      _employeeDisplayNameCtrl.selection = TextSelection.collapsed(
+        offset: _employeeDisplayNameCtrl.text.length,
+      );
+    }
+    if (!_employeeUsernameEdited) {
+      final username = _professionalUsername(fullName);
+      if (_employeeUsernameCtrl.text != username) {
+        _employeeUsernameCtrl.text = username;
+        _employeeUsernameCtrl.selection = TextSelection.collapsed(
+          offset: _employeeUsernameCtrl.text.length,
+        );
+      }
+    }
+  }
+
+  void _handleEmployeeFullNameChanged() {
+    final generated = [
+      _employeeFirstNameCtrl.text.trim(),
+      _employeeLastNameCtrl.text.trim(),
+    ].where((part) => part.isNotEmpty).join(' ');
+    if (_employeeFullNameCtrl.text.trim() != generated) {
+      _employeeFullNameEdited = true;
+    }
+  }
+
+  void _handleEmployeeDisplayNameChanged() {
+    final generated = [
+      _employeeFirstNameCtrl.text.trim(),
+      _employeeLastNameCtrl.text.trim(),
+    ].where((part) => part.isNotEmpty).join(' ');
+    if (_employeeDisplayNameCtrl.text.trim() != generated) {
+      _employeeDisplayNameEdited = true;
+    }
+  }
+
+  void _handleEmployeeUsernameChanged() {
+    final generated = _professionalUsername(_employeeFullNameCtrl.text.trim());
+    if (_employeeUsernameCtrl.text.trim() != generated) {
+      _employeeUsernameEdited = true;
+    }
+  }
+
+  String _professionalUsername(String name) {
+    final normalized = name
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9\s.]'), '')
+        .trim()
+        .replaceAll(RegExp(r'\s+'), '.');
+    return normalized.isEmpty ? '' : 'healon.$normalized';
+  }
+
   void _refreshEmployeePreview() {
     if (mounted) setState(() {});
+  }
+
+  void _showLoginPasswordBriefly() {
+    _loginPasswordPeekTimer?.cancel();
+    _loginPasswordEyeDownAt = DateTime.now();
+    if (mounted) {
+      setState(() {
+        _showPassword = true;
+        _isLoginPasswordEyePressed = true;
+      });
+    }
+  }
+
+  void _releaseLoginPasswordPeek() {
+    final pressedAt = _loginPasswordEyeDownAt;
+    final heldFor = pressedAt == null
+        ? Duration.zero
+        : DateTime.now().difference(pressedAt);
+    _loginPasswordEyeDownAt = null;
+    if (heldFor >= const Duration(milliseconds: 360)) {
+      _hideLoginPasswordPeek();
+      return;
+    }
+    _loginPasswordPeekTimer?.cancel();
+    if (mounted) {
+      setState(() => _isLoginPasswordEyePressed = false);
+    }
+    _loginPasswordPeekTimer = Timer(
+      const Duration(seconds: 1),
+      _hideLoginPasswordPeek,
+    );
+  }
+
+  void _hideLoginPasswordPeek() {
+    _loginPasswordPeekTimer?.cancel();
+    _loginPasswordEyeDownAt = null;
+    if (mounted) {
+      setState(() {
+        _showPassword = false;
+        _isLoginPasswordEyePressed = false;
+      });
+    }
   }
 
   int _readInt(Map<String, dynamic>? map, String key) {
@@ -616,16 +817,26 @@ class _HomePageState extends State<HomePage> {
   @override
   void dispose() {
     _leaveSubmitSuccessTimer?.cancel();
+    _loginPasswordPeekTimer?.cancel();
     _empIdCtrl.removeListener(_handleLoginUsernameChanged);
+    _employeeFirstNameCtrl.removeListener(_handleEmployeeNameChanged);
+    _employeeLastNameCtrl.removeListener(_handleEmployeeNameChanged);
+    _employeeFullNameCtrl.removeListener(_handleEmployeeFullNameChanged);
+    _employeeDisplayNameCtrl.removeListener(_handleEmployeeDisplayNameChanged);
+    _employeeUsernameCtrl.removeListener(_handleEmployeeUsernameChanged);
     for (final controller in [
       _employeeDisplayNameCtrl,
+      _employeeFullNameCtrl,
       _employeeFirstNameCtrl,
       _employeeLastNameCtrl,
+      _employeeDobCtrl,
       _employeeEmailCtrl,
       _employeePhoneCtrl,
       _employeeDepartmentCtrl,
       _employeeDesignationCtrl,
       _employeeUsernameCtrl,
+      _employeePasswordCtrl,
+      _employeeConfirmPasswordCtrl,
     ]) {
       controller.removeListener(_refreshEmployeePreview);
     }
@@ -637,6 +848,7 @@ class _HomePageState extends State<HomePage> {
     _helpdeskIssueCtrl.dispose();
     _loginHelpdeskIssueCtrl.dispose();
     _employeeDisplayNameCtrl.dispose();
+    _employeeFullNameCtrl.dispose();
     _employeeFirstNameCtrl.dispose();
     _employeeLastNameCtrl.dispose();
     _employeeDobCtrl.dispose();
@@ -646,6 +858,7 @@ class _HomePageState extends State<HomePage> {
     _employeeDesignationCtrl.dispose();
     _employeeUsernameCtrl.dispose();
     _employeePasswordCtrl.dispose();
+    _employeeConfirmPasswordCtrl.dispose();
     _employeeSearchCtrl.dispose();
     _reimbursementReasonCtrl.dispose();
     _editEmployeeDisplayNameCtrl.dispose();
@@ -660,9 +873,11 @@ class _HomePageState extends State<HomePage> {
     _editEmployeePasswordCtrl.dispose();
     _adminAttendanceSearchCtrl.dispose();
     _adminReportSearchCtrl.dispose();
+    _locationNameCtrl.dispose();
     _locationAddressCtrl.dispose();
     _locationMapLinkCtrl.dispose();
     _locationRadiusCtrl.dispose();
+    _locationEmployeeSearchCtrl.dispose();
     _leaveCcCtrl.dispose();
     _leaveReasonCtrl.dispose();
     _regularizationCcCtrl.dispose();
@@ -1179,6 +1394,33 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  bool get _isAttendanceLocationRestrictionEnabled {
+    final assignedLocation =
+        _currentUser?['assigned_location'] as Map<String, dynamic>?;
+    return assignedLocation?['is_active'] == true;
+  }
+
+  Future<Map<String, dynamic>?> _buildAttendancePayload(
+    String actionLabel,
+    String photo,
+  ) async {
+    final body = <String, dynamic>{'photo_biometric': photo};
+    if (!_isAttendanceLocationRestrictionEnabled) {
+      return body;
+    }
+
+    final pos = await _getAttendanceLocation(actionLabel);
+    if (pos == null) {
+      return null;
+    }
+    body.addAll({
+      'latitude': pos.latitude.toStringAsFixed(6),
+      'longitude': pos.longitude.toStringAsFixed(6),
+      'accuracy': pos.accuracy,
+    });
+    return body;
+  }
+
   Future<String?> _captureAttendancePhoto(String actionLabel) async {
     _showNotification('Capture your photo biometric to $actionLabel');
     final photo = await photo_biometric.pickPhotoBiometric();
@@ -1204,11 +1446,36 @@ class _HomePageState extends State<HomePage> {
     setState(() {
       if (isEdit) {
         _editEmployeeProfilePhotoBiometric = photo;
+        _editEmployeeProfileVerificationFileName = 'Captured photo';
       } else {
         _employeeProfilePhotoBiometric = photo;
+        _employeeProfileVerificationFileName = 'Captured photo';
       }
     });
     _showNotification('Employee verification photo captured');
+  }
+
+  Future<void> _uploadEmployeeVerificationAttachment({
+    bool isEdit = false,
+  }) async {
+    final upload = await photo_biometric.pickEmployeeVerificationUpload();
+    if (upload == null || upload.dataUrl.isEmpty) {
+      _showNotification(
+        'Upload a photo, PDF, DOC, or DOCX verification file',
+        isError: true,
+      );
+      return;
+    }
+    setState(() {
+      if (isEdit) {
+        _editEmployeeProfilePhotoBiometric = upload.dataUrl;
+        _editEmployeeProfileVerificationFileName = upload.fileName;
+      } else {
+        _employeeProfilePhotoBiometric = upload.dataUrl;
+        _employeeProfileVerificationFileName = upload.fileName;
+      }
+    });
+    _showNotification('Employee verification file uploaded');
   }
 
   Future<void> checkOut() async {
@@ -1217,8 +1484,8 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
-    final pos = await _getAttendanceLocation('check out');
-    if (pos == null) {
+    final body = await _buildAttendancePayload('check out', photo);
+    if (body == null) {
       return;
     }
 
@@ -1228,12 +1495,7 @@ class _HomePageState extends State<HomePage> {
         'Content-Type': 'application/json',
         if (_token != null) 'Authorization': 'Token $_token',
       },
-      body: jsonEncode({
-        'latitude': pos.latitude.toStringAsFixed(6),
-        'longitude': pos.longitude.toStringAsFixed(6),
-        'accuracy': pos.accuracy,
-        'photo_biometric': photo,
-      }),
+      body: jsonEncode(body),
     );
     if (resp.statusCode == 201) {
       final details = _attendanceBiometricDetails(resp.body);
@@ -2205,7 +2467,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _registerEmployee() async {
-    var displayName = _employeeDisplayNameCtrl.text.trim();
+    var displayName = _employeeFullNameCtrl.text.trim();
     var firstName = _employeeFirstNameCtrl.text.trim();
     var lastName = _employeeLastNameCtrl.text.trim();
     final dateOfBirth = _employeeDobCtrl.text.trim();
@@ -2213,9 +2475,13 @@ class _HomePageState extends State<HomePage> {
     final phone = _employeePhoneCtrl.text.trim();
     final username = _employeeUsernameCtrl.text.trim();
     final password = _employeePasswordCtrl.text;
+    final confirmPassword = _employeeConfirmPasswordCtrl.text;
     final department = _employeeDepartmentCtrl.text.trim();
     final designation = _employeeDesignationCtrl.text.trim();
 
+    if (displayName.isEmpty) {
+      displayName = _employeeDisplayNameCtrl.text.trim();
+    }
     if (displayName.isEmpty && firstName.isNotEmpty) {
       displayName = [
         firstName,
@@ -2246,6 +2512,20 @@ class _HomePageState extends State<HomePage> {
       _showNotification(passwordError, isError: true);
       return;
     }
+    if (password != confirmPassword) {
+      _showNotification(
+        'Password and confirm password must match',
+        isError: true,
+      );
+      return;
+    }
+    if (phone.isNotEmpty && !RegExp(r'^\d+$').hasMatch(phone)) {
+      _showNotification(
+        'Phone number should contain numbers only',
+        isError: true,
+      );
+      return;
+    }
     if (_employeeProfilePhotoBiometric == null ||
         _employeeProfilePhotoBiometric!.isEmpty) {
       _showNotification('Capture employee verification photo', isError: true);
@@ -2274,6 +2554,7 @@ class _HomePageState extends State<HomePage> {
           'first_name': firstName,
           'last_name': lastName,
           'date_of_birth': dateOfBirth,
+          'gender': _employeeGender ?? '',
           'email': email,
           'mobile_number': phone,
           'profile_photo_biometric': _employeeProfilePhotoBiometric,
@@ -2289,20 +2570,28 @@ class _HomePageState extends State<HomePage> {
 
       if (resp.statusCode == 201) {
         _employeeDisplayNameCtrl.clear();
+        _employeeFullNameCtrl.clear();
         _employeeFirstNameCtrl.clear();
         _employeeLastNameCtrl.clear();
         _employeeDobCtrl.clear();
         _employeeEmailCtrl.clear();
         _employeePhoneCtrl.clear();
         _employeeProfilePhotoBiometric = null;
+        _employeeProfileVerificationFileName = null;
         _employeeUsernameCtrl.clear();
         _employeePasswordCtrl.clear();
+        _employeeConfirmPasswordCtrl.clear();
         _employeeDepartmentCtrl.clear();
         _employeeDesignationCtrl.clear();
         setState(() {
           _employeeCanAccessUser = true;
           _employeeCanAccessAdmin = false;
           _employeeCanAccessHr = false;
+          _employeeRegistrationStep = 0;
+          _employeeFullNameEdited = false;
+          _employeeDisplayNameEdited = false;
+          _employeeUsernameEdited = false;
+          _employeeGender = null;
         });
         _showNotification('Employee added successfully');
         await loadDashboardData();
@@ -2362,6 +2651,10 @@ class _HomePageState extends State<HomePage> {
       _editEmployeePhoneCtrl.text = employee['mobile_number']?.toString() ?? '';
       _editEmployeeProfilePhotoBiometric = employee['profile_photo_biometric']
           ?.toString();
+      _editEmployeeProfileVerificationFileName =
+          _editEmployeeProfilePhotoBiometric?.isNotEmpty == true
+          ? 'Saved verification file'
+          : null;
       _editEmployeeUsernameCtrl.text = employee['username']?.toString() ?? '';
       _editEmployeeDepartmentCtrl.text =
           employee['department']?.toString() ?? '';
@@ -2539,6 +2832,7 @@ class _HomePageState extends State<HomePage> {
           _editEmployeeEmailCtrl.clear();
           _editEmployeePhoneCtrl.clear();
           _editEmployeeProfilePhotoBiometric = null;
+          _editEmployeeProfileVerificationFileName = null;
           _editEmployeeDepartmentCtrl.clear();
           _editEmployeeDesignationCtrl.clear();
           _editEmployeeUsernameCtrl.clear();
@@ -2673,10 +2967,16 @@ class _HomePageState extends State<HomePage> {
     final location = employee['assigned_location'] as Map<String, dynamic>?;
     setState(() {
       _selectedLocationEmployeeId = employeeId;
+      _locationNameCtrl.text =
+          location?['name']?.toString().trim().isNotEmpty == true
+          ? location!['name'].toString()
+          : 'Work Location';
       _locationAddressCtrl.text = location?['address']?.toString() ?? '';
       _locationMapLinkCtrl.text = location?['map_url']?.toString() ?? '';
       _locationRadiusCtrl.text =
           location?['radius_meters']?.toString() ?? '100';
+      _locationEmployeeSearchCtrl.text = _employeeDisplayName(employee);
+      _locationAttendanceEnabled = location?['is_active'] as bool? ?? true;
       _locationEffectiveFrom = DateTime.tryParse(
         location?['effective_from']?.toString() ?? '',
       );
@@ -2688,9 +2988,16 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _saveEmployeeLocation() async {
     final employeeId = _selectedLocationEmployeeId;
+    final locationName = _locationNameCtrl.text.trim().isEmpty
+        ? 'Work Location'
+        : _locationNameCtrl.text.trim();
     final address = _locationAddressCtrl.text.trim();
     final mapOrExtraAddress = _locationMapLinkCtrl.text.trim();
-    final savedAddress = address.isNotEmpty ? address : mapOrExtraAddress;
+    final savedAddress = address.isNotEmpty
+        ? address
+        : _locationAttendanceEnabled
+        ? mapOrExtraAddress
+        : 'Location attendance disabled';
     final mapLink = _looksLikeUrl(mapOrExtraAddress) ? mapOrExtraAddress : '';
     final radius = int.tryParse(_locationRadiusCtrl.text.trim()) ?? 100;
 
@@ -2698,7 +3005,7 @@ class _HomePageState extends State<HomePage> {
       _showNotification('Select an employee first', isError: true);
       return;
     }
-    if (savedAddress.isEmpty) {
+    if (_locationAttendanceEnabled && savedAddress.isEmpty) {
       _showNotification('Enter the assigned work address', isError: true);
       return;
     }
@@ -2725,7 +3032,7 @@ class _HomePageState extends State<HomePage> {
           if (_token != null) 'Authorization': 'Token $_token',
         },
         body: jsonEncode({
-          'name': 'Work Location',
+          'name': locationName,
           'address': savedAddress,
           'map_url': mapLink,
           'extra_location_text': mapOrExtraAddress,
@@ -2736,7 +3043,7 @@ class _HomePageState extends State<HomePage> {
           'effective_to': _locationEffectiveTo == null
               ? null
               : _dateQuery(_locationEffectiveTo!),
-          'is_active': true,
+          'is_active': _locationAttendanceEnabled,
         }),
       );
 
@@ -2773,8 +3080,8 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
-    final pos = await _getAttendanceLocation('check in');
-    if (pos == null) {
+    final body = await _buildAttendancePayload('check in', photo);
+    if (body == null) {
       return;
     }
 
@@ -2784,12 +3091,7 @@ class _HomePageState extends State<HomePage> {
         'Content-Type': 'application/json',
         if (_token != null) 'Authorization': 'Token $_token',
       },
-      body: jsonEncode({
-        'latitude': pos.latitude.toStringAsFixed(6),
-        'longitude': pos.longitude.toStringAsFixed(6),
-        'accuracy': pos.accuracy,
-        'photo_biometric': photo,
-      }),
+      body: jsonEncode(body),
     );
     if (resp.statusCode == 201) {
       final details = _attendanceBiometricDetails(resp.body);
@@ -3100,6 +3402,56 @@ class _HomePageState extends State<HomePage> {
       _selectedMenu = menu;
       _selectedHrSection = section;
     });
+  }
+
+  bool get _shouldShowDashboardBackButton {
+    return _selectedMenu != 'Dashboard' ||
+        _selectedHrDashboardDetail.isNotEmpty ||
+        _selectedAdminAttendanceDetail != null;
+  }
+
+  void _returnToParentSection() {
+    setState(() {
+      if (_selectedAdminAttendanceDetail != null) {
+        _selectedAdminAttendanceDetail = null;
+        return;
+      }
+      if (_selectedHrDashboardDetail.isNotEmpty) {
+        _selectedHrDashboardDetail = '';
+        return;
+      }
+      if (_selectedMenu == 'Attendance') {
+        _selectedAttendanceSection = 'Daily Attendance';
+        _selectedAdminAttendanceSection = 'Daily Attendances';
+      } else if (_selectedMenu == 'Tasks') {
+        _selectedTaskSection = 'Pending Tasks';
+      } else if (_selectedMenu == 'Leaves') {
+        _selectedLeaveSection = 'Apply Leave';
+      } else if (_selectedMenu == 'Salary') {
+        _selectedSalarySection = 'Payslips';
+      } else if (_selectedMenu == 'Employee Management') {
+        _selectedAttendanceSection = _isAdminRole
+            ? 'Edit Employee'
+            : 'Add Employee';
+        _selectedHrSection = _selectedAttendanceSection;
+      } else if (_selectedMenu == 'Smart Location Management' ||
+          _selectedMenu == 'Employee Location') {
+        _selectedAttendanceSection = _isAdminRole
+            ? 'Edit Location'
+            : 'Add Location';
+        _selectedHrSection = _selectedAttendanceSection;
+      } else if (_selectedMenu == 'Employee Payroll') {
+        _selectedHrPayrollSection = 'Reimbursement';
+      } else {
+        _selectedMenu = 'Dashboard';
+      }
+    });
+    if (_selectedMenu == 'Attendance') {
+      loadAttendanceReport();
+    }
+    if (_selectedMenu == 'Employee Payroll') {
+      _loadAdminReimbursements();
+    }
   }
 
   void _changeReportMonth(int monthDelta) {
@@ -3485,47 +3837,7 @@ class _HomePageState extends State<HomePage> {
                                     const SizedBox(height: 16),
 
                                     // Password Field
-                                    Center(
-                                      child: SizedBox(
-                                        width: 300,
-                                        height: 44,
-                                        child: TextField(
-                                          controller: _passCtrl,
-                                          enabled: !_isLoading,
-                                          obscureText: !_showPassword,
-                                          style: const TextStyle(
-                                            color: Colors.black,
-                                          ),
-                                          decoration: InputDecoration(
-                                            hintText: 'password',
-                                            filled: true,
-                                            fillColor: Colors.white,
-                                            contentPadding:
-                                                const EdgeInsets.symmetric(
-                                                  horizontal: 16,
-                                                  vertical: 10,
-                                                ),
-                                            suffixIcon: IconButton(
-                                              icon: Icon(
-                                                _showPassword
-                                                    ? Icons.visibility_off
-                                                    : Icons.visibility,
-                                                color: Colors.grey,
-                                              ),
-                                              onPressed: () => setState(
-                                                () => _showPassword =
-                                                    !_showPassword,
-                                              ),
-                                            ),
-                                            border: OutlineInputBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(12),
-                                              borderSide: BorderSide.none,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
+                                    _buildLoginPasswordField(),
                                     const SizedBox(height: 12),
 
                                     if (_passwordRefillUsername != null) ...[
@@ -3770,6 +4082,113 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  Widget _buildLoginPasswordField() {
+    return Center(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final fieldWidth = constraints.maxWidth < 360
+              ? constraints.maxWidth
+              : 300.0;
+          return AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
+            width: fieldWidth,
+            height: 44,
+            decoration: BoxDecoration(borderRadius: BorderRadius.circular(12)),
+            child: TextField(
+              controller: _passCtrl,
+              enabled: !_isLoading,
+              obscureText: !_showPassword,
+              style: const TextStyle(color: Colors.black, letterSpacing: 0),
+              decoration: InputDecoration(
+                hintText: 'Password',
+                hintStyle: TextStyle(
+                  color: _mutedText.withValues(alpha: 0.78),
+                  fontWeight: FontWeight.w600,
+                ),
+                prefixIcon: const Icon(
+                  Icons.lock_outline,
+                  color: _medicalGreen,
+                  size: 20,
+                ),
+                prefixIconConstraints: const BoxConstraints(
+                  minWidth: 44,
+                  minHeight: 44,
+                ),
+                suffixIcon: Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: Tooltip(
+                    message: 'Tap to peek. Hold to reveal.',
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTapDown: (_) => _showLoginPasswordBriefly(),
+                      onTapUp: (_) => _releaseLoginPasswordPeek(),
+                      onTapCancel: _hideLoginPasswordPeek,
+                      child: MouseRegion(
+                        cursor: SystemMouseCursors.click,
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 160),
+                          curve: Curves.easeOutCubic,
+                          width: 34,
+                          height: 34,
+                          margin: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            color: _showPassword
+                                ? _medicalGreen.withValues(alpha: 0.14)
+                                : const Color(0xFFF1F5F9),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: _showPassword
+                                  ? _medicalGreen.withValues(alpha: 0.42)
+                                  : _lineColor,
+                            ),
+                          ),
+                          child: AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 150),
+                            child: Icon(
+                              _showPassword
+                                  ? Icons.visibility_off_outlined
+                                  : Icons.visibility_outlined,
+                              key: ValueKey(_showPassword),
+                              color: _showPassword ? _medicalGreen : _mutedText,
+                              size: _isLoginPasswordEyePressed ? 19 : 20,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                suffixIconConstraints: const BoxConstraints(
+                  minWidth: 44,
+                  minHeight: 44,
+                ),
+                filled: true,
+                fillColor: Colors.white,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 10,
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: _medicalGreen, width: 2),
+                ),
+                disabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   Widget _buildLoginHelpdesk() {
     return Positioned(
       left: 24,
@@ -3901,18 +4320,22 @@ class _HomePageState extends State<HomePage> {
           AnimatedContainer(
             duration: const Duration(milliseconds: 260),
             curve: Curves.easeOutCubic,
-            width: _isSidebarCollapsed ? 92 : 292,
+            width: _isSidebarCollapsed ? 78 : 262,
             decoration: const BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [Color(0xFF10204A), Color(0xFF172554)],
+                colors: [
+                  Color(0xFF07142F),
+                  Color(0xFF0D1D45),
+                  Color(0xFF102A5C),
+                ],
               ),
               boxShadow: [
                 BoxShadow(
-                  color: Color(0x26000000),
-                  blurRadius: 24,
-                  offset: Offset(8, 0),
+                  color: Color(0x3306152F),
+                  blurRadius: 28,
+                  offset: Offset(10, 0),
                 ),
               ],
             ),
@@ -3922,11 +4345,16 @@ class _HomePageState extends State<HomePage> {
                 AnimatedContainer(
                   duration: const Duration(milliseconds: 260),
                   width: double.infinity,
-                  margin: const EdgeInsets.fromLTRB(16, 18, 16, 10),
-                  padding: EdgeInsets.all(_isSidebarCollapsed ? 10 : 18),
+                  margin: EdgeInsets.fromLTRB(
+                    _isSidebarCollapsed ? 10 : 14,
+                    14,
+                    _isSidebarCollapsed ? 10 : 14,
+                    8,
+                  ),
+                  padding: EdgeInsets.all(_isSidebarCollapsed ? 8 : 12),
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(16),
+                    color: Colors.white.withValues(alpha: 0.07),
+                    borderRadius: BorderRadius.circular(14),
                     border: Border.all(
                       color: Colors.white.withValues(alpha: 0.12),
                     ),
@@ -3934,10 +4362,10 @@ class _HomePageState extends State<HomePage> {
                   child: Row(
                     children: [
                       Container(
-                        width: 54,
-                        height: 54,
+                        width: _isSidebarCollapsed ? 42 : 46,
+                        height: _isSidebarCollapsed ? 42 : 46,
                         decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(16),
+                          borderRadius: BorderRadius.circular(13),
                           gradient: const LinearGradient(
                             colors: [_brandTeal, Color(0xFF34D399)],
                           ),
@@ -3955,7 +4383,7 @@ class _HomePageState extends State<HomePage> {
                               : _isHrRole
                               ? Icons.badge
                               : Icons.person,
-                          size: 30,
+                          size: _isSidebarCollapsed ? 23 : 26,
                           color: Colors.white,
                         ),
                       ),
@@ -3969,20 +4397,24 @@ class _HomePageState extends State<HomePage> {
                                 'HealOn',
                                 style: TextStyle(
                                   color: Colors.white,
-                                  fontSize: 20,
+                                  fontFamily: 'Inter',
+                                  fontSize: 18,
                                   fontWeight: FontWeight.w900,
+                                  letterSpacing: 0,
                                 ),
                               ),
-                              const SizedBox(height: 3),
+                              const SizedBox(height: 2),
                               Text(
-                                'Healthcare Workforce Platform',
+                                'Healthcare Workforce',
                                 style: TextStyle(
                                   color: Colors.white.withValues(alpha: 0.76),
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
+                                  fontFamily: 'Inter',
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: 0,
                                 ),
                               ),
-                              const SizedBox(height: 5),
+                              const SizedBox(height: 6),
                               _buildStatusPill(
                                 '$_roleLabel Panel',
                                 color: _brandTeal,
@@ -3996,7 +4428,9 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ),
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  padding: EdgeInsets.symmetric(
+                    horizontal: _isSidebarCollapsed ? 10 : 14,
+                  ),
                   child: Align(
                     alignment: _isSidebarCollapsed
                         ? Alignment.center
@@ -4008,6 +4442,13 @@ class _HomePageState extends State<HomePage> {
                       onPressed: () => setState(
                         () => _isSidebarCollapsed = !_isSidebarCollapsed,
                       ),
+                      style: IconButton.styleFrom(
+                        backgroundColor: Colors.white.withValues(alpha: 0.1),
+                        foregroundColor: Colors.white.withValues(alpha: 0.82),
+                        hoverColor: Colors.white.withValues(alpha: 0.16),
+                        minimumSize: const Size(34, 34),
+                        padding: EdgeInsets.zero,
+                      ),
                       icon: Icon(
                         _isSidebarCollapsed
                             ? Icons.keyboard_double_arrow_right
@@ -4018,10 +4459,12 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ),
                 const SizedBox(height: 8),
+                _buildSidebarSeparator(),
 
                 // Menu Items
                 Expanded(
                   child: SingleChildScrollView(
+                    padding: const EdgeInsets.only(top: 6, bottom: 6),
                     child: Column(
                       children: [
                         // DASHBOARD
@@ -4370,7 +4813,12 @@ class _HomePageState extends State<HomePage> {
                 ),
                 // Logout
                 Padding(
-                  padding: const EdgeInsets.all(16),
+                  padding: EdgeInsets.fromLTRB(
+                    _isSidebarCollapsed ? 10 : 14,
+                    8,
+                    _isSidebarCollapsed ? 10 : 14,
+                    14,
+                  ),
                   child: SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
@@ -4381,19 +4829,36 @@ class _HomePageState extends State<HomePage> {
                         _status = '';
                       }),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFEF4444),
+                        backgroundColor: const Color(
+                          0xFFEF4444,
+                        ).withValues(alpha: 0.9),
                         foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        elevation: 0,
+                        shadowColor: Colors.transparent,
+                        padding: EdgeInsets.symmetric(
+                          vertical: _isSidebarCollapsed ? 12 : 11,
+                          horizontal: 10,
+                        ),
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
+                          borderRadius: BorderRadius.circular(12),
                         ),
                       ),
-                      child: const Row(
+                      child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.logout, size: 18),
-                          SizedBox(width: 8),
-                          Text('Logout'),
+                          const Icon(Icons.logout, size: 17),
+                          if (!_isSidebarCollapsed) ...[
+                            const SizedBox(width: 8),
+                            const Text(
+                              'Logout',
+                              style: TextStyle(
+                                fontFamily: 'Inter',
+                                fontSize: 13,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0,
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                     ),
@@ -4459,6 +4924,8 @@ class _HomePageState extends State<HomePage> {
                             ? _buildTotalEmployeesDashboard()
                             : _selectedMenu == 'Pending Requests'
                             ? _buildPendingRequestsDashboard()
+                            : _selectedMenu == 'Employee Payroll'
+                            ? _buildAdminReimbursementsView()
                             : _selectedMenu == 'Helpdesk'
                             ? _buildHelpdeskView()
                             : _buildAdminDashboard()
@@ -4826,6 +5293,32 @@ class _HomePageState extends State<HomePage> {
   Widget _buildDashboardWorkspace({required Widget child}) {
     return Column(
       children: [
+        if (_shouldShowDashboardBackButton)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 18, 24, 0),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Material(
+                color: Colors.white.withValues(alpha: 0.92),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  side: BorderSide(color: _brandBlue.withValues(alpha: 0.28)),
+                ),
+                child: IconButton(
+                  tooltip: 'Back',
+                  onPressed: _returnToParentSection,
+                  icon: const Icon(Icons.arrow_back_rounded),
+                  color: _brandBlue,
+                  iconSize: 20,
+                  constraints: const BoxConstraints.tightFor(
+                    width: 42,
+                    height: 38,
+                  ),
+                  padding: EdgeInsets.zero,
+                ),
+              ),
+            ),
+          ),
         Expanded(
           child: AnimatedSwitcher(
             duration: const Duration(milliseconds: 240),
@@ -9104,7 +9597,7 @@ class _HomePageState extends State<HomePage> {
     Widget? suffixIcon,
   }) {
     return InputDecoration(
-      labelText: label,
+      labelText: label == null || label.isEmpty ? null : label,
       hintText: hintText,
       prefixIcon: label == null ? null : Icon(_iconForField(label), size: 20),
       suffixIcon: suffixIcon,
@@ -10756,54 +11249,31 @@ class _HomePageState extends State<HomePage> {
                 'value': '${_readInt(summary, 'total_employees')} Employees',
                 'icon': Icons.groups_2_outlined,
                 'color': _brandBlue,
+                'onTap': () {
+                  setState(() => _selectedMenu = 'Total Employees');
+                  loadDashboardData();
+                },
               },
               {
                 'title': 'Pending approvals',
                 'value': '${_adminPendingWorkItems().length} Requests',
                 'icon': Icons.pending_actions_outlined,
                 'color': Colors.orange,
-              },
-              {
-                'title': 'Payroll readiness',
-                'value': 'Healthcare HR',
-                'icon': Icons.account_balance_wallet_outlined,
-                'color': _medicalGreen,
-              },
-            ],
-          ),
-          const SizedBox(height: 24),
-
-          GridView.count(
-            crossAxisCount: 2,
-            childAspectRatio: 2.4,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            mainAxisSpacing: 24,
-            crossAxisSpacing: 24,
-            children: [
-              _buildAdminStatCard(
-                'Total Employees',
-                _readInt(summary, 'total_employees').toString(),
-                Icons.people,
-                const Color(0xFF2B5AF0),
-                onTap: () {
-                  setState(() => _selectedMenu = 'Total Employees');
-                  loadDashboardData();
-                },
-              ),
-              _buildAdminStatCard(
-                'Total Requests',
-                _readInt(summary, 'total_requests').toString(),
-                Icons.pending_actions,
-                Colors.purple,
-                onTap: () {
+                'onTap': () {
                   setState(() {
                     _selectedMenu = 'Pending Requests';
                     _selectedPendingRequestStatus = 'pending';
                   });
                   loadDashboardData();
                 },
-              ),
+              },
+              {
+                'title': 'Payroll readiness',
+                'value': 'Healthcare HR',
+                'icon': Icons.account_balance_wallet_outlined,
+                'color': _medicalGreen,
+                'onTap': () => _selectHrPayrollSection('Salary Structure'),
+              },
             ],
           ),
           const SizedBox(height: 24),
@@ -11593,7 +12063,10 @@ class _HomePageState extends State<HomePage> {
                 ),
                 _buildEmployeePhotoCapturePanel(
                   photo: _editEmployeeProfilePhotoBiometric,
+                  fileName: _editEmployeeProfileVerificationFileName,
                   onCapture: () => _captureEmployeeProfilePhoto(isEdit: true),
+                  onUpload: () =>
+                      _uploadEmployeeVerificationAttachment(isEdit: true),
                 ),
               ],
             ),
@@ -11684,7 +12157,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildHealthcareInsightsRow({
-    required List<Map<String, Object>> items,
+    required List<Map<String, Object?>> items,
   }) {
     return GridView.extent(
       maxCrossAxisExtent: 330,
@@ -11699,6 +12172,7 @@ class _HomePageState extends State<HomePage> {
           value: item['value'] as String,
           icon: item['icon'] as IconData,
           color: item['color'] as Color,
+          onTap: item['onTap'] as VoidCallback?,
         );
       }).toList(),
     );
@@ -11709,8 +12183,9 @@ class _HomePageState extends State<HomePage> {
     required String value,
     required IconData icon,
     required Color color,
+    VoidCallback? onTap,
   }) {
-    return Container(
+    final card = Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -11769,6 +12244,17 @@ class _HomePageState extends State<HomePage> {
         ],
       ),
     );
+    if (onTap == null) {
+      return card;
+    }
+    return Semantics(
+      button: true,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(22),
+        child: card,
+      ),
+    );
   }
 
   IconData _iconForField(String label) {
@@ -11808,21 +12294,23 @@ class _HomePageState extends State<HomePage> {
     Widget? suffixIcon,
   }) {
     return InputDecoration(
-      labelText: label,
+      labelText: label.isEmpty ? null : label,
       hintText: hintText,
-      prefixIcon: Icon(icon ?? _iconForField(label), size: 20),
+      prefixIcon: Icon(icon ?? _iconForField(label), size: 18),
+      prefixIconConstraints: const BoxConstraints(minWidth: 42, minHeight: 40),
       suffixIcon: suffixIcon,
+      suffixIconConstraints: const BoxConstraints(minWidth: 42, minHeight: 40),
       isDense: true,
       filled: true,
       fillColor: Colors.white,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(10),
         borderSide: const BorderSide(color: _lineColor),
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(10),
         borderSide: const BorderSide(color: _brandBlue, width: 1.6),
       ),
     );
@@ -11830,7 +12318,9 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildEmployeePhotoCapturePanel({
     required String? photo,
+    String? fileName,
     required VoidCallback onCapture,
+    VoidCallback? onUpload,
   }) {
     return SizedBox(
       width: 246,
@@ -11845,7 +12335,7 @@ class _HomePageState extends State<HomePage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Employee Verification Photo',
+              'Employee Verification File',
               style: TextStyle(
                 color: Color(0xFF1F2E5A),
                 fontWeight: FontWeight.w700,
@@ -11854,22 +12344,36 @@ class _HomePageState extends State<HomePage> {
             const SizedBox(height: 10),
             if (photo?.isNotEmpty == true)
               _buildPhotoBiometricPreview(
-                'Captured employee photo',
+                fileName ?? 'Employee verification file',
                 photo!,
                 compact: true,
               )
             else
               Text(
-                'Capture photo before saving employee.',
+                'Capture a photo or upload a document before saving employee.',
                 style: TextStyle(color: Colors.grey[700]),
               ),
             const SizedBox(height: 10),
-            OutlinedButton.icon(
-              onPressed: onCapture,
-              icon: const Icon(Icons.camera_alt),
-              label: Text(
-                photo?.isNotEmpty == true ? 'Recapture Photo' : 'Take Photo',
-              ),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: onCapture,
+                  icon: const Icon(Icons.camera_alt),
+                  label: Text(
+                    photo?.isNotEmpty == true
+                        ? 'Recapture Photo'
+                        : 'Take Photo',
+                  ),
+                ),
+                if (onUpload != null)
+                  OutlinedButton.icon(
+                    onPressed: onUpload,
+                    icon: const Icon(Icons.upload_file_outlined),
+                    label: const Text('Upload File'),
+                  ),
+              ],
             ),
           ],
         ),
@@ -11880,6 +12384,8 @@ class _HomePageState extends State<HomePage> {
   Widget _buildEmployeeRegistrationPreviewCard() {
     final displayName = _employeeDisplayNameCtrl.text.trim().isNotEmpty
         ? _employeeDisplayNameCtrl.text.trim()
+        : _employeeFullNameCtrl.text.trim().isNotEmpty
+        ? _employeeFullNameCtrl.text.trim()
         : [
             _employeeFirstNameCtrl.text.trim(),
             _employeeLastNameCtrl.text.trim(),
@@ -11936,10 +12442,26 @@ class _HomePageState extends State<HomePage> {
                 ),
                 child: _employeeProfilePhotoBiometric?.isNotEmpty == true
                     ? ClipOval(
-                        child: Image.network(
-                          _employeeProfilePhotoBiometric!,
-                          fit: BoxFit.cover,
-                        ),
+                        child:
+                            _employeeProfilePhotoBiometric!.startsWith(
+                              'data:image/',
+                            )
+                            ? Image.network(
+                                _employeeProfilePhotoBiometric!,
+                                fit: BoxFit.cover,
+                              )
+                            : Container(
+                                color: Colors.white.withValues(alpha: 0.16),
+                                child: Icon(
+                                  _employeeProfilePhotoBiometric!.startsWith(
+                                        'data:application/pdf',
+                                      )
+                                      ? Icons.picture_as_pdf_outlined
+                                      : Icons.description_outlined,
+                                  color: Colors.white,
+                                  size: 30,
+                                ),
+                              ),
                       )
                     : const Icon(
                         Icons.person_add_alt_1_rounded,
@@ -12064,6 +12586,8 @@ class _HomePageState extends State<HomePage> {
     String? message,
     bool compact = false,
   }) {
+    final isImage = photo.startsWith('data:image/') || photo.startsWith('http');
+    final isPdf = photo.startsWith('data:application/pdf');
     return Container(
       width: compact ? double.infinity : 360,
       padding: const EdgeInsets.all(12),
@@ -12077,12 +12601,25 @@ class _HomePageState extends State<HomePage> {
         children: [
           ClipRRect(
             borderRadius: BorderRadius.circular(8),
-            child: Image.network(
-              photo,
-              width: compact ? 74 : 92,
-              height: compact ? 58 : 72,
-              fit: BoxFit.cover,
-            ),
+            child: isImage
+                ? Image.network(
+                    photo,
+                    width: compact ? 74 : 92,
+                    height: compact ? 58 : 72,
+                    fit: BoxFit.cover,
+                  )
+                : Container(
+                    width: compact ? 74 : 92,
+                    height: compact ? 58 : 72,
+                    color: const Color(0xFFEFF6FF),
+                    child: Icon(
+                      isPdf
+                          ? Icons.picture_as_pdf_outlined
+                          : Icons.description_outlined,
+                      color: isPdf ? Colors.red : _brandBlue,
+                      size: compact ? 28 : 34,
+                    ),
+                  ),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -12162,153 +12699,905 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildSmartLocationManagementView() {
     final isAdd = _selectedAttendanceSection == 'Add Location';
-    final employeeOptions = _adminEmployeeMaps();
     final selectedEmployee = _selectedLocationEmployee();
 
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(32),
+      padding: const EdgeInsets.fromLTRB(28, 26, 28, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Smart Location Management',
-            style: Theme.of(context).textTheme.displaySmall?.copyWith(
-              color: const Color(0xFF1F2E5A),
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            isAdd
-                ? 'Assign a check-in location to an employee.'
-                : 'Edit employee locations used for check-in and check-out.',
-            style: Theme.of(
-              context,
-            ).textTheme.bodyMedium?.copyWith(color: Colors.grey[600]),
-          ),
-          const SizedBox(height: 28),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 760),
-            child: Container(
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.grey[200]!),
-              ),
-              child: Column(
+          _buildLocationHero(isAdd: isAdd),
+          const SizedBox(height: 22),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final wide = constraints.maxWidth >= 1120;
+              final employeeCard = _buildLocationEmployeeCard(
+                isAdd: isAdd,
+                selectedEmployee: selectedEmployee,
+              );
+              final detailsCard = _buildLocationDetailsCard(isAdd: isAdd);
+              final previewCard = _buildLocationPreviewCard();
+              if (!wide) {
+                return Column(
+                  children: [
+                    employeeCard,
+                    const SizedBox(height: 12),
+                    detailsCard,
+                    const SizedBox(height: 12),
+                    previewCard,
+                  ],
+                );
+              }
+              return Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  DropdownButtonFormField<int>(
-                    initialValue:
-                        employeeOptions.any(
-                          (employee) =>
-                              _employeeId(employee) ==
-                              _selectedLocationEmployeeId,
-                        )
-                        ? _selectedLocationEmployeeId
-                        : null,
-                    decoration: const InputDecoration(
-                      labelText: 'Employee',
-                      border: OutlineInputBorder(),
-                      isDense: true,
-                    ),
-                    items: employeeOptions.map((employee) {
-                      final id = _employeeId(employee);
-                      return DropdownMenuItem<int>(
-                        value: id,
-                        child: Text(
-                          _employeeDisplayName(employee),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      );
-                    }).toList(),
-                    onChanged: _selectLocationEmployee,
-                  ),
-                  const SizedBox(height: 14),
-                  TextField(
-                    controller: _locationAddressCtrl,
-                    minLines: 2,
-                    maxLines: 3,
-                    decoration: const InputDecoration(
-                      labelText: 'Assigned Work Address / Particular Address',
-                      hintText: 'Enter the complete address or landmark',
-                      border: OutlineInputBorder(),
-                      isDense: true,
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  TextField(
-                    controller: _locationMapLinkCtrl,
-                    minLines: 1,
-                    maxLines: 2,
-                    decoration: const InputDecoration(
-                      labelText: 'Map Link or Extra Address (Optional)',
-                      hintText: 'Paste a map URL, or type a nearby landmark',
-                      border: OutlineInputBorder(),
-                      isDense: true,
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  TextField(
-                    controller: _locationRadiusCtrl,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'Allowed Radius (meters)',
-                      border: OutlineInputBorder(),
-                      isDense: true,
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  _buildLocationEffectiveDateFields(),
-                  if (!isAdd) ...[
-                    const SizedBox(height: 14),
-                    _buildLocationDateField(),
-                  ],
-                  const SizedBox(height: 18),
-                  Row(
-                    children: [
-                      ElevatedButton.icon(
-                        onPressed: _isLocationSaving
-                            ? null
-                            : _saveEmployeeLocation,
-                        icon: _isLocationSaving
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(Icons.location_on),
-                        label: Text(
-                          isAdd ? 'Assign Location' : 'Update Location',
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      if (_showLocationAssignedPopup)
-                        _buildStatusPill('Location Assigned'),
-                    ],
-                  ),
-                  if (!isAdd &&
-                      selectedEmployee?['assigned_location'] != null) ...[
-                    const SizedBox(height: 14),
-                    Text(
-                      'Current location details loaded for ${selectedEmployee?['name'] ?? 'employee'}.',
-                      style: TextStyle(color: Colors.grey[700]),
-                    ),
-                  ],
+                  Expanded(flex: 10, child: employeeCard),
+                  const SizedBox(width: 8),
+                  Expanded(flex: 11, child: detailsCard),
+                  const SizedBox(width: 8),
+                  Expanded(flex: 10, child: previewCard),
                 ],
-              ),
-            ),
+              );
+            },
           ),
+          if (!_locationAttendanceEnabled) ...[
+            const SizedBox(height: 14),
+            _buildLocationDisabledCard(fullWidth: true),
+          ],
           if (!isAdd) ...[
-            const SizedBox(height: 28),
+            const SizedBox(height: 16),
             _buildLocationAssignmentsTable(),
+          ],
+          const SizedBox(height: 14),
+          _buildLocationActionBar(isAdd: isAdd),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLocationHero({required bool isAdd}) {
+    return Row(
+      children: [
+        IconButton(
+          tooltip: 'Back',
+          onPressed: () => setState(() => _selectedMenu = 'Dashboard'),
+          icon: const Icon(Icons.arrow_back, color: _inkBlue),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                isAdd ? 'Add Location' : 'Edit Location',
+                style: const TextStyle(
+                  color: _inkBlue,
+                  fontSize: 22,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                isAdd
+                    ? 'Assign location and set GPS radius for employee attendance.'
+                    : 'Update employee location and GPS radius settings.',
+                style: const TextStyle(
+                  color: _mutedText,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLocationEmployeeCard({
+    required bool isAdd,
+    required Map<String, dynamic>? selectedEmployee,
+  }) {
+    return _buildSimpleLocationCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSimpleFieldLabel('Employee', requiredMark: true),
+          const SizedBox(height: 8),
+          _buildLocationEmployeeSearch(selectedEmployee),
+          const SizedBox(height: 22),
+          if (!isAdd) ...[
+            _buildSimpleFieldLabel('Start Date'),
+            const SizedBox(height: 8),
+            _buildLocationEffectiveDateButton(
+              label: 'Start Date',
+              value: _locationEffectiveFrom,
+              emptyLabel: 'Immediate',
+              onPick: (date) => setState(() => _locationEffectiveFrom = date),
+              onClear: () => setState(() => _locationEffectiveFrom = null),
+            ),
+            const SizedBox(height: 18),
+          ],
+          _buildSimpleFieldLabel('End Date (Optional)'),
+          const SizedBox(height: 8),
+          _buildLocationEffectiveDateButton(
+            label: 'End Date',
+            value: _locationEffectiveTo,
+            emptyLabel: 'Select end date',
+            onPick: (date) => setState(() => _locationEffectiveTo = date),
+            onClear: () => setState(() => _locationEffectiveTo = null),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLocationDetailsCard({required bool isAdd}) {
+    return _buildSimpleLocationCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSimpleFieldLabel('Location Name', requiredMark: true),
+          const SizedBox(height: 8),
+          _buildLocationTextField(
+            controller: _locationNameCtrl,
+            label: '',
+            hint: 'Enter location name',
+            icon: Icons.business_outlined,
+          ),
+          const SizedBox(height: 18),
+          _buildSimpleFieldLabel('Address', requiredMark: true),
+          const SizedBox(height: 8),
+          _buildLocationTextField(
+            controller: _locationAddressCtrl,
+            label: '',
+            hint: 'Enter full address',
+            icon: Icons.location_on_outlined,
+            minLines: 3,
+            maxLines: 3,
+          ),
+          const SizedBox(height: 18),
+          _buildSimpleFieldLabel('Location Attendance'),
+          const SizedBox(height: 8),
+          _buildLocationAttendanceToggle(),
+          if (_locationAttendanceEnabled) ...[
+            const SizedBox(height: 18),
+            _buildLocationRadiusControl(),
+            const SizedBox(height: 14),
+            _buildLocationTextField(
+              controller: _locationMapLinkCtrl,
+              label: '',
+              hint: 'Map link or landmark (optional)',
+              icon: Icons.map_outlined,
+              minLines: 1,
+              maxLines: 2,
+            ),
           ],
         ],
       ),
     );
+  }
+
+  Widget _buildSimpleLocationCard({required Widget child}) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFE4EAF3)),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF1E293B).withValues(alpha: 0.04),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: child,
+    );
+  }
+
+  Widget _buildSimpleFieldLabel(String label, {bool requiredMark = false}) {
+    return RichText(
+      text: TextSpan(
+        style: const TextStyle(
+          color: _inkBlue,
+          fontSize: 13,
+          fontWeight: FontWeight.w800,
+        ),
+        children: [
+          TextSpan(text: label),
+          if (requiredMark)
+            const TextSpan(
+              text: ' *',
+              style: TextStyle(color: Colors.red, fontWeight: FontWeight.w900),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLocationEmployeeSearch(Map<String, dynamic>? selectedEmployee) {
+    final query = _locationEmployeeSearchCtrl.text.trim().toLowerCase();
+    final matches = query.length < 2
+        ? <Map<String, dynamic>>[]
+        : _adminEmployeeMaps()
+              .where((employee) {
+                final name = employee['name']?.toString().toLowerCase() ?? '';
+                final employeeId =
+                    employee['employee_id']?.toString().toLowerCase() ?? '';
+                final username =
+                    employee['username']?.toString().toLowerCase() ?? '';
+                return name.contains(query) ||
+                    employeeId.contains(query) ||
+                    username.contains(query);
+              })
+              .take(8)
+              .toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildLocationTextField(
+          controller: _locationEmployeeSearchCtrl,
+          label: '',
+          hint: 'Search employee by name or ID...',
+          icon: Icons.person_search_outlined,
+          onChanged: (value) {
+            final selectedLabel = selectedEmployee == null
+                ? ''
+                : _employeeDisplayName(selectedEmployee);
+            setState(() {
+              if (value.trim() != selectedLabel) {
+                _selectedLocationEmployeeId = null;
+              }
+            });
+          },
+        ),
+        if (query.length >= 2) ...[
+          const SizedBox(height: 8),
+          Container(
+            constraints: const BoxConstraints(maxHeight: 220),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: const Color(0xFFE4EAF3)),
+            ),
+            child: matches.isEmpty
+                ? const Padding(
+                    padding: EdgeInsets.all(14),
+                    child: Text(
+                      'No employees match your search.',
+                      style: TextStyle(
+                        color: _mutedText,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  )
+                : ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: matches.length,
+                    separatorBuilder: (context, index) =>
+                        const Divider(height: 1),
+                    itemBuilder: (context, index) {
+                      final employee = matches[index];
+                      return _buildEmployeeSuggestionCard(employee);
+                    },
+                  ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildEmployeeSuggestionCard(Map<String, dynamic> employee) {
+    final employeeId =
+        employee['employee_id']?.toString().trim().isNotEmpty == true
+        ? employee['employee_id'].toString()
+        : employee['username']?.toString() ?? 'EMP-${_employeeId(employee)}';
+    final name = employee['name']?.toString() ?? 'Employee';
+    final department =
+        employee['department']?.toString().trim().isNotEmpty == true
+        ? employee['department'].toString()
+        : 'Healthcare Ops';
+    final designation =
+        employee['designation']?.toString().trim().isNotEmpty == true
+        ? employee['designation'].toString()
+        : 'Team Member';
+    final initials = _employeeInitials(employee);
+    final selected = _employeeId(employee) == _selectedLocationEmployeeId;
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(6),
+      onTap: () => _selectLocationEmployee(_employeeId(employee)),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+        decoration: BoxDecoration(
+          color: selected ? const Color(0xFFEFF6FF) : Colors.white,
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Row(
+          children: [
+            _buildEmployeeAvatar(initials, size: 34),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: _inkBlue,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '$employeeId  -  $department  -  $designation',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: _mutedText,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              selected ? Icons.check_circle : Icons.arrow_forward_ios,
+              color: selected ? _medicalGreen : _mutedText,
+              size: selected ? 20 : 14,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLocationAttendanceToggle() {
+    return Row(
+      children: [
+        Expanded(
+          child: _buildLocationToggleTile(
+            selected: _locationAttendanceEnabled,
+            title: 'Enable Location',
+            subtitle: 'GPS radius required for check-in/out',
+            icon: Icons.gps_fixed,
+            onTap: () => setState(() => _locationAttendanceEnabled = true),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _buildLocationToggleTile(
+            selected: !_locationAttendanceEnabled,
+            title: 'Disable Location',
+            subtitle: 'Attendance allowed without GPS radius',
+            icon: Icons.location_disabled_outlined,
+            onTap: () => setState(() => _locationAttendanceEnabled = false),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLocationToggleTile({
+    required bool selected,
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(6),
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: selected ? const Color(0xFFEFF6FF) : Colors.white,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(
+            color: selected ? _brandBlue : const Color(0xFFDCE4EF),
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              selected ? Icons.radio_button_checked : Icons.radio_button_off,
+              color: selected ? _brandBlue : const Color(0xFF94A3B8),
+              size: 18,
+            ),
+            const SizedBox(width: 9),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: selected ? _brandBlue : _inkBlue,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 12,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: _mutedText,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 9.5,
+                      height: 1.2,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLocationTextField({
+    required TextEditingController controller,
+    required String label,
+    required String hint,
+    required IconData icon,
+    int minLines = 1,
+    int maxLines = 1,
+    TextInputType? keyboardType,
+    ValueChanged<String>? onChanged,
+  }) {
+    return TextField(
+      controller: controller,
+      minLines: minLines,
+      maxLines: maxLines,
+      keyboardType: keyboardType,
+      onChanged: onChanged ?? (_) => setState(() {}),
+      style: const TextStyle(
+        color: _inkBlue,
+        fontSize: 13,
+        fontWeight: FontWeight.w700,
+      ),
+      decoration: InputDecoration(
+        labelText: label.isEmpty ? null : label,
+        hintText: hint,
+        prefixIcon: Icon(icon, size: 18),
+        isDense: true,
+        filled: true,
+        fillColor: Colors.white,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 12,
+        ),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(6),
+          borderSide: const BorderSide(color: Color(0xFFDCE4EF)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(6),
+          borderSide: const BorderSide(color: _brandBlue, width: 1.3),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLocationRadiusControl() {
+    final radius = (int.tryParse(_locationRadiusCtrl.text.trim()) ?? 100)
+        .clamp(10, 1000)
+        .toDouble();
+    return Container(
+      padding: EdgeInsets.zero,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Text(
+                'Set GPS Radius',
+                style: TextStyle(
+                  color: _inkBlue,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              const Text(
+                'Radius (in meters)',
+                style: TextStyle(
+                  color: _mutedText,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(width: 12),
+              SizedBox(
+                width: 70,
+                child: TextField(
+                  controller: _locationRadiusCtrl,
+                  keyboardType: TextInputType.number,
+                  onChanged: (_) => setState(() {}),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 10,
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(6),
+                      borderSide: const BorderSide(color: Color(0xFFDCE4EF)),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Text(
+                'm',
+                style: TextStyle(color: _inkBlue, fontWeight: FontWeight.w700),
+              ),
+            ],
+          ),
+          Slider(
+            value: radius,
+            min: 10,
+            max: 1000,
+            divisions: 99,
+            activeColor: _brandBlue,
+            inactiveColor: const Color(0xFFDCE4EF),
+            onChanged: (value) {
+              setState(() {
+                _locationRadiusCtrl.text = value.round().toString();
+              });
+            },
+          ),
+          const Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('10m', style: TextStyle(color: _mutedText, fontSize: 11)),
+              Text('250m', style: TextStyle(color: _mutedText, fontSize: 11)),
+              Text('500m', style: TextStyle(color: _mutedText, fontSize: 11)),
+              Text('1000m', style: TextStyle(color: _mutedText, fontSize: 11)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLocationPreviewCard() {
+    return _buildSimpleLocationCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Live Location Preview',
+            style: TextStyle(
+              color: _inkBlue,
+              fontSize: 13,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 12),
+          _locationAttendanceEnabled
+              ? _buildLiveMapPreview()
+              : _buildLocationDisabledCard(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLiveMapPreview() {
+    final radius = int.tryParse(_locationRadiusCtrl.text.trim()) ?? 100;
+    final address = _locationAddressCtrl.text.trim().isEmpty
+        ? 'Select address'
+        : _locationAddressCtrl.text.trim();
+    return Container(
+      key: const ValueKey('enabled-map-preview'),
+      height: 282,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: const Color(0xFFE4EAF3)),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(6),
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Color(0xFFE0F2FE),
+                      Color(0xFFDCFCE7),
+                      Color(0xFFF8FAFC),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Positioned.fill(child: CustomPaint(painter: _LocationMapPainter())),
+            Center(
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 220),
+                width: (radius / 1000 * 160).clamp(84, 160),
+                height: (radius / 1000 * 160).clamp(84, 160),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: _brandBlue.withValues(alpha: 0.14),
+                  border: Border.all(
+                    color: _brandBlue.withValues(alpha: 0.45),
+                    width: 1.4,
+                  ),
+                ),
+              ),
+            ),
+            Center(
+              child: Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: _brandBlue,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.location_on, color: Colors.white),
+              ),
+            ),
+            Positioned(
+              right: 12,
+              top: 118,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: const Color(0xFFDCE4EF)),
+                ),
+                child: const Column(
+                  children: [
+                    SizedBox(
+                      width: 34,
+                      height: 34,
+                      child: Icon(Icons.add, color: _inkBlue, size: 18),
+                    ),
+                    Divider(height: 1),
+                    SizedBox(
+                      width: 34,
+                      height: 34,
+                      child: Icon(Icons.remove, color: _inkBlue, size: 18),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  border: Border(
+                    top: BorderSide(color: const Color(0xFFE4EAF3)),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.location_on_outlined, color: _brandBlue),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        address,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: _inkBlue,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    OutlinedButton(
+                      onPressed: () {},
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: _brandBlue,
+                        side: const BorderSide(color: _brandBlue),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(5),
+                        ),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                      ),
+                      child: const Text(
+                        'Pick on Map',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLocationDisabledCard({bool fullWidth = false}) {
+    return Container(
+      key: const ValueKey('location-disabled-card'),
+      width: fullWidth ? double.infinity : null,
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FBFF),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: _brandBlue.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.info_outline, color: _brandBlue, size: 22),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Location Restriction Disabled',
+                  style: TextStyle(
+                    color: _brandBlue,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 14,
+                  ),
+                ),
+                SizedBox(height: 4),
+                Text(
+                  'Attendance allowed without GPS radius validation.',
+                  style: TextStyle(
+                    color: _brandBlue,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12,
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLocationActionBar({required bool isAdd}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      decoration: const BoxDecoration(
+        border: Border(top: BorderSide(color: Color(0xFFE4EAF3))),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          OutlinedButton(
+            onPressed: _resetLocationForm,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: _inkBlue,
+              side: const BorderSide(color: Color(0xFFDCE4EF)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(6),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
+            ),
+            child: const Text('Cancel'),
+          ),
+          const SizedBox(width: 10),
+          ElevatedButton(
+            onPressed: _isLocationSaving ? null : _saveEmployeeLocation,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _brandBlue,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(6),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 14),
+            ),
+            child: _isLocationSaving
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : Text(isAdd ? 'Save Location' : 'Update Location'),
+          ),
+          if (_showLocationAssignedPopup) ...[
+            const SizedBox(width: 10),
+            _buildStatusPill('Location Assigned', color: _medicalGreen),
+          ],
+        ],
+      ),
+    );
+  }
+
+  void _resetLocationForm() {
+    setState(() {
+      _selectedLocationEmployeeId = null;
+      _locationEmployeeSearchCtrl.clear();
+      _locationNameCtrl.text = 'Work Location';
+      _locationAddressCtrl.clear();
+      _locationMapLinkCtrl.clear();
+      _locationRadiusCtrl.text = '100';
+      _locationAttendanceEnabled = true;
+      _locationEffectiveFrom = null;
+      _locationEffectiveTo = null;
+      _selectedLocationDate = null;
+    });
+  }
+
+  Widget _buildEmployeeAvatar(String initials, {double size = 42}) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(colors: [_brandBlue, _medicalGreen]),
+        shape: BoxShape.circle,
+        boxShadow: [
+          BoxShadow(
+            color: _brandBlue.withValues(alpha: 0.2),
+            blurRadius: 14,
+            offset: const Offset(0, 7),
+          ),
+        ],
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        initials,
+        style: TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w900,
+          fontSize: size > 48 ? 17 : 13,
+        ),
+      ),
+    );
+  }
+
+  String _employeeInitials(Map<String, dynamic>? employee) {
+    final name = employee?['name']?.toString().trim() ?? '';
+    if (name.isEmpty) return 'HE';
+    final parts = name.split(RegExp(r'\s+'));
+    final first = parts.first.isEmpty ? '' : parts.first[0];
+    final second = parts.length > 1 && parts[1].isNotEmpty ? parts[1][0] : '';
+    return (first + second).toUpperCase();
   }
 
   Widget _buildLocationAssignmentsTable() {
@@ -12344,8 +13633,10 @@ class _HomePageState extends State<HomePage> {
 
     return Container(
       decoration: BoxDecoration(
-        border: Border.all(color: Colors.grey[200]!),
-        borderRadius: BorderRadius.circular(8),
+        color: Colors.white.withValues(alpha: 0.92),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.88)),
+        borderRadius: BorderRadius.circular(22),
+        boxShadow: _softShadow(0.07),
       ),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
@@ -12410,68 +13701,6 @@ class _HomePageState extends State<HomePage> {
           }).toList(),
         ),
       ),
-    );
-  }
-
-  Widget _buildLocationDateField() {
-    return SizedBox(
-      width: 360,
-      child: Row(
-        children: [
-          Expanded(
-            child: OutlinedButton.icon(
-              onPressed: () async {
-                final picked = await showDatePicker(
-                  context: context,
-                  initialDate: _selectedLocationDate ?? DateTime.now(),
-                  firstDate: DateTime(2020),
-                  lastDate: DateTime(DateTime.now().year + 2),
-                );
-                if (picked != null) {
-                  setState(() => _selectedLocationDate = picked);
-                }
-              },
-              icon: const Icon(Icons.calendar_today),
-              label: Text(
-                _selectedLocationDate == null
-                    ? 'All Dates'
-                    : _readableDate(_selectedLocationDate!.toIso8601String()),
-              ),
-            ),
-          ),
-          if (_selectedLocationDate != null) ...[
-            const SizedBox(width: 8),
-            IconButton(
-              tooltip: 'Clear date',
-              onPressed: () => setState(() => _selectedLocationDate = null),
-              icon: const Icon(Icons.close),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildLocationEffectiveDateFields() {
-    return Wrap(
-      spacing: 12,
-      runSpacing: 12,
-      children: [
-        _buildLocationEffectiveDateButton(
-          label: 'Start Date',
-          value: _locationEffectiveFrom,
-          emptyLabel: 'Immediate',
-          onPick: (date) => setState(() => _locationEffectiveFrom = date),
-          onClear: () => setState(() => _locationEffectiveFrom = null),
-        ),
-        _buildLocationEffectiveDateButton(
-          label: 'End Date',
-          value: _locationEffectiveTo,
-          emptyLabel: 'Open ended',
-          onPick: (date) => setState(() => _locationEffectiveTo = date),
-          onClear: () => setState(() => _locationEffectiveTo = null),
-        ),
-      ],
     );
   }
 
@@ -13451,114 +14680,44 @@ class _HomePageState extends State<HomePage> {
         children: [
           _buildSectionHeader(
             'Employee Registration',
-            'Create a healthcare workforce profile with live verification preview.',
+            'Premium healthcare onboarding for verified workforce profiles.',
           ),
           const SizedBox(height: 24),
-
           LayoutBuilder(
             builder: (context, constraints) {
-              final stacked = constraints.maxWidth < 980;
-              final form = Container(
-                padding: const EdgeInsets.all(22),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.94),
-                  borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: Colors.white),
-                  boxShadow: _softShadow(0.07),
-                ),
+              final stacked = constraints.maxWidth < 1080;
+              final form = _buildRegistrationGlassCard(
+                constraints: constraints,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'Employee Details',
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        color: _inkBlue,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const SizedBox(height: 18),
-                    Wrap(
-                      spacing: 14,
-                      runSpacing: 14,
-                      children: [
-                        _buildCompactEditField(
-                          'Display Name',
-                          _employeeDisplayNameCtrl,
-                        ),
-                        _buildCompactEditField(
-                          'First Name',
-                          _employeeFirstNameCtrl,
-                        ),
-                        _buildCompactEditField(
-                          'Last Name',
-                          _employeeLastNameCtrl,
-                        ),
-                        _buildCompactEditField(
-                          'Date of Birth (YYYY-MM-DD)',
-                          _employeeDobCtrl,
-                          keyboardType: TextInputType.datetime,
-                        ),
-                        _buildCompactEditField(
-                          'Employee Email',
-                          _employeeEmailCtrl,
-                          keyboardType: TextInputType.emailAddress,
-                        ),
-                        _buildCompactEditField(
-                          'Phone Number',
-                          _employeePhoneCtrl,
-                          keyboardType: TextInputType.phone,
-                        ),
-                        _buildCompactEditField(
-                          'Login Username',
-                          _employeeUsernameCtrl,
-                        ),
-                        _buildCompactEditField(
-                          'Login Password',
-                          _employeePasswordCtrl,
-                          obscureText: true,
-                        ),
-                        _buildCompactEditField(
-                          'Department',
-                          _employeeDepartmentCtrl,
-                        ),
-                        _buildCompactEditField(
-                          'Designation',
-                          _employeeDesignationCtrl,
-                        ),
-                        _buildEmployeePhotoCapturePanel(
-                          photo: _employeeProfilePhotoBiometric,
-                          onCapture: _captureEmployeeProfilePhoto,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-                    _buildDashboardPermissionBoxes(
-                      canUser: _employeeCanAccessUser,
-                      canAdmin: _employeeCanAccessAdmin,
-                      canHr: _employeeCanAccessHr,
-                      onUserChanged: (value) => setState(
-                        () => _employeeCanAccessUser = value ?? false,
-                      ),
-                      onAdminChanged: (value) => setState(
-                        () => _employeeCanAccessAdmin = value ?? false,
-                      ),
-                      onHrChanged: (value) =>
-                          setState(() => _employeeCanAccessHr = value ?? false),
-                    ),
-                    const SizedBox(height: 20),
-                    ElevatedButton.icon(
-                      onPressed: _isEmployeeSaving ? null : _registerEmployee,
-                      icon: _isEmployeeSaving
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
+                    _buildEmployeeRegistrationStepper(),
+                    const SizedBox(height: 22),
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 280),
+                      switchInCurve: Curves.easeOutCubic,
+                      switchOutCurve: Curves.easeInCubic,
+                      transitionBuilder: (child, animation) {
+                        return FadeTransition(
+                          opacity: animation,
+                          child: SlideTransition(
+                            position: Tween<Offset>(
+                              begin: const Offset(0.03, 0),
+                              end: Offset.zero,
+                            ).animate(animation),
+                            child: child,
+                          ),
+                        );
+                      },
+                      child: _employeeRegistrationStep == 0
+                          ? _buildEmployeePersonalDetailsStep(
+                              key: const ValueKey('employee-personal-step'),
+                              maxWidth: constraints.maxWidth,
                             )
-                          : const Icon(Icons.person_add_alt_1),
-                      label: const Text('Register Employee'),
+                          : _buildEmployeeLoginVerificationStep(
+                              key: const ValueKey('employee-login-step'),
+                              maxWidth: constraints.maxWidth,
+                            ),
                     ),
                   ],
                 ),
@@ -13566,16 +14725,35 @@ class _HomePageState extends State<HomePage> {
               final preview = _buildEmployeeRegistrationPreviewCard();
               if (stacked) {
                 return Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [form, const SizedBox(height: 18), preview],
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Align(
+                      alignment: Alignment.topLeft,
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 680),
+                        child: form,
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    Align(
+                      alignment: Alignment.topLeft,
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 360),
+                        child: preview,
+                      ),
+                    ),
+                  ],
                 );
               }
               return Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(flex: 7, child: form),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 680),
+                    child: form,
+                  ),
                   const SizedBox(width: 22),
-                  Expanded(flex: 3, child: preview),
+                  SizedBox(width: 330, child: preview),
                 ],
               );
             },
@@ -13583,6 +14761,934 @@ class _HomePageState extends State<HomePage> {
         ],
       ),
     );
+  }
+
+  Widget _buildRegistrationGlassCard({
+    required BoxConstraints constraints,
+    required Widget child,
+  }) {
+    return Container(
+      padding: EdgeInsets.all(constraints.maxWidth < 620 ? 18 : 24),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Colors.white.withValues(alpha: 0.94),
+            const Color(0xFFF1F8FF).withValues(alpha: 0.88),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.86)),
+        boxShadow: [
+          BoxShadow(
+            color: _brandBlue.withValues(alpha: 0.08),
+            blurRadius: 30,
+            offset: const Offset(0, 18),
+          ),
+          BoxShadow(
+            color: _medicalGreen.withValues(alpha: 0.05),
+            blurRadius: 22,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: child,
+    );
+  }
+
+  Widget _buildEmployeeRegistrationStepper() {
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: _buildOnboardingStepPill(
+                index: 0,
+                title: 'Personal Details',
+                subtitle: 'Enter employee personal information',
+              ),
+            ),
+            Expanded(
+              child: _buildOnboardingStepPill(
+                index: 1,
+                title: 'Login & Verification',
+                subtitle: 'Set login, verify and assign access',
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(999),
+          child: LinearProgressIndicator(
+            value: _employeeRegistrationStep == 0 ? 0.5 : 1,
+            minHeight: 3,
+            backgroundColor: _lineColor,
+            valueColor: const AlwaysStoppedAnimation<Color>(_brandBlue),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildOnboardingStepPill({
+    required int index,
+    required String title,
+    required String subtitle,
+  }) {
+    final active = _employeeRegistrationStep == index;
+    final complete = _employeeRegistrationStep > index;
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 220),
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: active || complete ? _brandBlue : Colors.white,
+              border: Border.all(
+                color: active || complete ? _brandBlue : _lineColor,
+                width: 1.5,
+              ),
+            ),
+            child: Center(
+              child: Text(
+                '${index + 1}',
+                style: TextStyle(
+                  color: active || complete ? Colors.white : _inkBlue,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 15,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: active || complete ? _inkBlue : _mutedText,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _mutedText,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmployeePersonalDetailsStep({
+    required Key key,
+    required double maxWidth,
+  }) {
+    return Column(
+      key: key,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildOnboardingStepHeader(
+          'Step 1',
+          'Employee Personal Details',
+          'Enter employee personal information',
+          Icons.person_outline,
+        ),
+        const SizedBox(height: 18),
+        _buildResponsiveFormGrid(
+          maxWidth: maxWidth,
+          children: [
+            _buildOnboardingTextField(
+              label: 'First Name',
+              controller: _employeeFirstNameCtrl,
+              icon: Icons.person_outline,
+            ),
+            _buildOnboardingTextField(
+              label: 'Last Name',
+              controller: _employeeLastNameCtrl,
+              icon: Icons.person_outline,
+            ),
+            _buildOnboardingTextField(
+              label: 'Display Name',
+              controller: _employeeDisplayNameCtrl,
+              icon: Icons.account_circle_outlined,
+            ),
+            _buildOnboardingTextField(
+              label: 'Date of Birth',
+              controller: _employeeDobCtrl,
+              icon: Icons.calendar_today_outlined,
+              readOnly: true,
+              onTap: _pickEmployeeDateOfBirth,
+              suffixIcon: IconButton(
+                tooltip: 'Choose date',
+                onPressed: _pickEmployeeDateOfBirth,
+                icon: const Icon(Icons.event_available_outlined, size: 20),
+              ),
+            ),
+            _buildOnboardingTextField(
+              label: 'Employee Email ID',
+              controller: _employeeEmailCtrl,
+              icon: Icons.alternate_email,
+              keyboardType: TextInputType.emailAddress,
+            ),
+            _buildOnboardingDropdown(
+              label: 'Gender',
+              icon: Icons.wc_outlined,
+              value: _employeeGender,
+              items: const ['Male', 'Female', 'Other', 'Prefer not to say'],
+              onChanged: (value) => setState(() => _employeeGender = value),
+            ),
+            _buildOnboardingTextField(
+              label: 'Phone Number',
+              controller: _employeePhoneCtrl,
+              icon: Icons.call_outlined,
+              keyboardType: TextInputType.phone,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            ),
+          ],
+        ),
+        const SizedBox(height: 26),
+        Align(
+          alignment: Alignment.centerRight,
+          child: _buildGradientActionButton(
+            label: 'Next',
+            icon: Icons.arrow_forward_rounded,
+            onPressed: _goToEmployeeVerificationStep,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildEmployeeLoginVerificationStep({
+    required Key key,
+    required double maxWidth,
+  }) {
+    final passwordError = _employeePasswordCtrl.text.isEmpty
+        ? null
+        : _passwordRuleError(_employeePasswordCtrl.text);
+    final confirmError =
+        _employeeConfirmPasswordCtrl.text.isEmpty ||
+            _employeePasswordCtrl.text == _employeeConfirmPasswordCtrl.text
+        ? null
+        : 'Passwords do not match';
+    return Column(
+      key: key,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildOnboardingStepHeader(
+          'Step 2',
+          'Login & Verification',
+          'Assign access, verify identity and complete setup',
+          Icons.verified_user_outlined,
+        ),
+        const SizedBox(height: 18),
+        _buildResponsiveFormGrid(
+          maxWidth: maxWidth,
+          children: [
+            _buildOnboardingTextField(
+              label: 'Login Username',
+              controller: _employeeUsernameCtrl,
+              icon: Icons.account_circle_outlined,
+            ),
+            _buildOnboardingTextField(
+              label: 'Login Password',
+              controller: _employeePasswordCtrl,
+              icon: Icons.lock_outline,
+              obscureText: !_employeePasswordVisible,
+              helperText: passwordError,
+              helperColor: passwordError == null ? _mutedText : Colors.red,
+              suffixIcon: IconButton(
+                tooltip: _employeePasswordVisible
+                    ? 'Hide password'
+                    : 'Show password',
+                onPressed: () => setState(
+                  () => _employeePasswordVisible = !_employeePasswordVisible,
+                ),
+                icon: Icon(
+                  _employeePasswordVisible
+                      ? Icons.visibility_off_outlined
+                      : Icons.visibility_outlined,
+                  size: 20,
+                ),
+              ),
+            ),
+            _buildOnboardingTextField(
+              label: 'Confirm Password',
+              controller: _employeeConfirmPasswordCtrl,
+              icon: Icons.lock_reset_outlined,
+              obscureText: !_employeeConfirmPasswordVisible,
+              helperText: confirmError,
+              helperColor: confirmError == null ? _mutedText : Colors.red,
+              suffixIcon: IconButton(
+                tooltip: _employeeConfirmPasswordVisible
+                    ? 'Hide password'
+                    : 'Show password',
+                onPressed: () => setState(
+                  () => _employeeConfirmPasswordVisible =
+                      !_employeeConfirmPasswordVisible,
+                ),
+                icon: Icon(
+                  _employeeConfirmPasswordVisible
+                      ? Icons.visibility_off_outlined
+                      : Icons.visibility_outlined,
+                  size: 20,
+                ),
+              ),
+            ),
+            _buildOnboardingTextField(
+              label: 'Department',
+              icon: Icons.apartment_outlined,
+              controller: _employeeDepartmentCtrl,
+            ),
+            _buildOnboardingTextField(
+              label: 'Designation',
+              controller: _employeeDesignationCtrl,
+              icon: Icons.business_center_outlined,
+            ),
+          ],
+        ),
+        const SizedBox(height: 18),
+        _buildOnboardingSectionRow(
+          label: 'Employee Verification',
+          child: _buildEmployeeOnboardingPhotoPanel(),
+        ),
+        const SizedBox(height: 18),
+        _buildOnboardingSectionRow(
+          label: 'Dashboard Access',
+          child: _buildRoleSelectionCards(),
+        ),
+        const SizedBox(height: 24),
+        Row(
+          children: [
+            OutlinedButton.icon(
+              onPressed: _isEmployeeSaving
+                  ? null
+                  : () => setState(() => _employeeRegistrationStep = 0),
+              icon: const Icon(Icons.arrow_back_rounded),
+              label: const Text('Back'),
+            ),
+            const Spacer(),
+            _buildGradientActionButton(
+              label: 'Register Employee',
+              icon: Icons.person_add_alt_1,
+              isLoading: _isEmployeeSaving,
+              onPressed: _isEmployeeSaving ? null : _registerEmployee,
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildOnboardingStepHeader(
+    String eyebrow,
+    String title,
+    String subtitle,
+    IconData icon,
+  ) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 46,
+          height: 46,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: const Color(0xFFEFF6FF),
+            boxShadow: [
+              BoxShadow(
+                color: _brandBlue.withValues(alpha: 0.12),
+                blurRadius: 18,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Icon(icon, color: _brandBlue, size: 25),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                eyebrow,
+                style: const TextStyle(
+                  color: _medicalGreen,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 12,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                title,
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  color: _inkBlue,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                subtitle,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: _mutedText,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildResponsiveFormGrid({
+    required double maxWidth,
+    required List<Widget> children,
+  }) {
+    return Column(
+      children: children
+          .map(
+            (child) => Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: child,
+            ),
+          )
+          .toList(),
+    );
+  }
+
+  Widget _buildOnboardingTextField({
+    required String label,
+    required TextEditingController controller,
+    required IconData icon,
+    TextInputType? keyboardType,
+    bool obscureText = false,
+    bool readOnly = false,
+    FocusNode? focusNode,
+    VoidCallback? onTap,
+    Widget? suffixIcon,
+    String? helperText,
+    Color? helperColor,
+    List<TextInputFormatter>? inputFormatters,
+  }) {
+    return _buildOnboardingFieldRow(
+      label: label,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          boxShadow: [
+            BoxShadow(
+              color: _brandBlue.withValues(alpha: 0.04),
+              blurRadius: 12,
+              offset: const Offset(0, 5),
+            ),
+          ],
+        ),
+        child: SizedBox(
+          height: helperText == null ? 42 : null,
+          child: TextField(
+            controller: controller,
+            keyboardType: keyboardType,
+            obscureText: obscureText,
+            readOnly: readOnly,
+            focusNode: focusNode,
+            onTap: onTap,
+            inputFormatters: inputFormatters,
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+            decoration:
+                _premiumInputDecoration(
+                  '',
+                  icon: icon,
+                  hintText: label,
+                  suffixIcon: suffixIcon,
+                ).copyWith(
+                  fillColor: Colors.white.withValues(alpha: 0.96),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 9,
+                  ),
+                  helperText: helperText,
+                  helperMaxLines: 2,
+                  helperStyle: TextStyle(
+                    color: helperColor ?? _mutedText,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOnboardingFieldRow({
+    required String label,
+    required Widget child,
+  }) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final stacked = constraints.maxWidth < 560;
+        final labelWidget = _buildRequiredFieldLabel(label);
+        if (stacked) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [labelWidget, const SizedBox(height: 8), child],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            SizedBox(width: 175, child: labelWidget),
+            const SizedBox(width: 18),
+            Expanded(child: child),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildOnboardingSectionRow({
+    required String label,
+    required Widget child,
+  }) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final stacked = constraints.maxWidth < 560;
+        final labelWidget = _buildRequiredFieldLabel(label);
+        if (stacked) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [labelWidget, const SizedBox(height: 8), child],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: 175,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: labelWidget,
+              ),
+            ),
+            const SizedBox(width: 18),
+            Expanded(child: child),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildRequiredFieldLabel(String label) {
+    return RichText(
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      text: TextSpan(
+        style: const TextStyle(
+          color: _inkBlue,
+          fontWeight: FontWeight.w800,
+          fontSize: 13,
+        ),
+        children: [
+          TextSpan(text: label),
+          const TextSpan(
+            text: ' *',
+            style: TextStyle(color: Colors.red, fontWeight: FontWeight.w900),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOnboardingDropdown({
+    required String label,
+    required IconData icon,
+    required String? value,
+    required List<String> items,
+    required ValueChanged<String?> onChanged,
+  }) {
+    return _buildOnboardingFieldRow(
+      label: label,
+      child: SizedBox(
+        height: 42,
+        child: DropdownButtonFormField<String>(
+          initialValue: value,
+          isExpanded: true,
+          decoration: _premiumInputDecoration('', icon: icon, hintText: label)
+              .copyWith(
+                fillColor: Colors.white.withValues(alpha: 0.96),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 9,
+                ),
+              ),
+          items: items
+              .map((item) => DropdownMenuItem(value: item, child: Text(item)))
+              .toList(),
+          onChanged: onChanged,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOnboardingControllerDropdown({
+    required String label,
+    required IconData icon,
+    required TextEditingController controller,
+    required List<String> items,
+  }) {
+    final currentValue = items.contains(controller.text)
+        ? controller.text
+        : null;
+    return _buildOnboardingFieldRow(
+      label: label,
+      child: DropdownButtonFormField<String>(
+        initialValue: currentValue,
+        isExpanded: true,
+        decoration: _premiumInputDecoration('', icon: icon, hintText: label)
+            .copyWith(
+              fillColor: Colors.white.withValues(alpha: 0.96),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 12,
+              ),
+            ),
+        icon: const Icon(Icons.keyboard_arrow_down_rounded),
+        items: items
+            .map((item) => DropdownMenuItem(value: item, child: Text(item)))
+            .toList(),
+        onChanged: (value) => setState(() => controller.text = value ?? ''),
+      ),
+    );
+  }
+
+  Widget _buildEmployeeOnboardingPhotoPanel() {
+    final hasPhoto = _employeeProfilePhotoBiometric?.isNotEmpty == true;
+    final isDocument =
+        hasPhoto && !_employeeProfilePhotoBiometric!.startsWith('data:image/');
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.88),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: _lineColor),
+        boxShadow: _softShadow(0.05),
+      ),
+      child: Column(
+        children: [
+          if (hasPhoto) ...[
+            Align(
+              alignment: Alignment.centerLeft,
+              child: SizedBox(
+                width: 72,
+                height: 72,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: isDocument
+                      ? Container(
+                          color: const Color(0xFFEFF6FF),
+                          child: Icon(
+                            _employeeProfilePhotoBiometric!.startsWith(
+                                  'data:application/pdf',
+                                )
+                                ? Icons.picture_as_pdf_outlined
+                                : Icons.description_outlined,
+                            color:
+                                _employeeProfilePhotoBiometric!.startsWith(
+                                  'data:application/pdf',
+                                )
+                                ? Colors.red
+                                : _brandBlue,
+                            size: 30,
+                          ),
+                        )
+                      : Image.network(
+                          _employeeProfilePhotoBiometric!,
+                          fit: BoxFit.cover,
+                        ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _captureEmployeeProfilePhoto,
+                  icon: const Icon(Icons.camera_alt_outlined),
+                  label: Text(hasPhoto ? 'Recapture Photo' : 'Capture Photo'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _uploadEmployeeVerificationAttachment,
+                  icon: const Icon(Icons.upload_file_outlined),
+                  label: const Text('Upload Photo'),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            hasPhoto
+                ? '${_employeeProfileVerificationFileName ?? 'Verification file'} attached and ready.'
+                : 'Capture or upload employee photo',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: _mutedText,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRoleSelectionCards() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.9),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: _lineColor),
+        boxShadow: _softShadow(0.04),
+      ),
+      child: Column(
+        children: [
+          _buildAccessRoleRadio(
+            title: 'User Dashboard',
+            subtitle: 'Employee self-service access',
+            icon: Icons.person_outline,
+            value: 'user',
+          ),
+          const SizedBox(height: 8),
+          _buildAccessRoleRadio(
+            title: 'HR Dashboard',
+            subtitle: 'People operations access',
+            icon: Icons.health_and_safety_outlined,
+            value: 'hr',
+          ),
+          const SizedBox(height: 8),
+          _buildAccessRoleRadio(
+            title: 'Admin Dashboard',
+            subtitle: 'Full system administration access',
+            icon: Icons.admin_panel_settings_outlined,
+            value: 'admin',
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAccessRoleRadio({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required String value,
+  }) {
+    final selected = _selectedEmployeeDashboardAccess == value;
+    return InkWell(
+      onTap: () => _setEmployeeDashboardAccess(value),
+      borderRadius: BorderRadius.circular(14),
+      hoverColor: _lightCyan.withValues(alpha: 0.55),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: selected ? _lightCyan : Colors.white.withValues(alpha: 0.9),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: selected ? _medicalGreen : _lineColor,
+            width: selected ? 1.5 : 1,
+          ),
+          boxShadow: _softShadow(selected ? 0.06 : 0.03),
+        ),
+        child: Row(
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              width: 22,
+              height: 22,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: selected ? _brandBlue : _mutedText,
+                  width: selected ? 6 : 1.8,
+                ),
+                color: Colors.white,
+              ),
+            ),
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                gradient: selected
+                    ? const LinearGradient(colors: [_brandBlue, _medicalGreen])
+                    : null,
+                color: selected ? null : const Color(0xFFF1F5F9),
+              ),
+              child: Icon(icon, color: selected ? Colors.white : _mutedText),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: _inkBlue,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 13,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: _mutedText,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String get _selectedEmployeeDashboardAccess {
+    if (_employeeCanAccessAdmin) return 'admin';
+    if (_employeeCanAccessHr) return 'hr';
+    return 'user';
+  }
+
+  void _setEmployeeDashboardAccess(String value) {
+    setState(() {
+      _employeeCanAccessUser = value == 'user';
+      _employeeCanAccessHr = value == 'hr';
+      _employeeCanAccessAdmin = value == 'admin';
+    });
+  }
+
+  Widget _buildGradientActionButton({
+    required String label,
+    required IconData icon,
+    required VoidCallback? onPressed,
+    bool isLoading = false,
+  }) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: onPressed == null
+            ? null
+            : const LinearGradient(colors: [_brandBlue, _medicalGreen]),
+        color: onPressed == null ? Colors.grey[300] : null,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+            color: _brandBlue.withValues(alpha: onPressed == null ? 0 : 0.22),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: ElevatedButton.icon(
+        onPressed: onPressed,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.transparent,
+          shadowColor: Colors.transparent,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
+        ),
+        icon: isLoading
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              )
+            : Icon(icon),
+        label: Text(label),
+      ),
+    );
+  }
+
+  void _goToEmployeeVerificationStep() {
+    final firstName = _employeeFirstNameCtrl.text.trim();
+    final lastName = _employeeLastNameCtrl.text.trim();
+    final fullName = _employeeFullNameCtrl.text.trim();
+    final email = _employeeEmailCtrl.text.trim();
+    final phone = _employeePhoneCtrl.text.trim();
+    if (firstName.isEmpty || lastName.isEmpty || fullName.isEmpty) {
+      _showNotification(
+        'First name, last name, and full name are required',
+        isError: true,
+      );
+      return;
+    }
+    if (email.isEmpty || !email.contains('@')) {
+      _showNotification('Enter a valid employee email ID', isError: true);
+      return;
+    }
+    if (phone.isNotEmpty && !RegExp(r'^\d+$').hasMatch(phone)) {
+      _showNotification(
+        'Phone number should contain numbers only',
+        isError: true,
+      );
+      return;
+    }
+    setState(() => _employeeRegistrationStep = 1);
+  }
+
+  Future<void> _pickEmployeeDateOfBirth() async {
+    final initial =
+        DateTime.tryParse(_employeeDobCtrl.text) ??
+        DateTime(DateTime.now().year - 25, 1, 1);
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime(1940),
+      lastDate: DateTime.now(),
+    );
+    if (picked == null) return;
+    setState(() => _employeeDobCtrl.text = _dateKey(picked) ?? '');
   }
 
   Widget _buildEmployeeProfileManagementView() {
@@ -14085,111 +16191,193 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildMenuItem(String label, IconData icon, String menuKey) {
     bool isActive = _selectedMenu == menuKey;
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 180),
-      curve: Curves.easeOut,
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-      decoration: BoxDecoration(
-        color: isActive
-            ? Colors.white.withValues(alpha: 0.14)
-            : Colors.transparent,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: isActive
-              ? Colors.white.withValues(alpha: 0.18)
-              : Colors.transparent,
-        ),
+    return Padding(
+      padding: EdgeInsets.symmetric(
+        horizontal: _isSidebarCollapsed ? 9 : 12,
+        vertical: 3,
       ),
-      child: ListTile(
-        dense: true,
-        horizontalTitleGap: _isSidebarCollapsed ? 0 : 12,
-        contentPadding: EdgeInsets.symmetric(
-          horizontal: _isSidebarCollapsed ? 12 : 14,
-          vertical: 4,
-        ),
-        leading: Container(
-          width: 34,
-          height: 34,
-          decoration: BoxDecoration(
-            color: isActive
-                ? _brandTeal.withValues(alpha: 0.22)
-                : Colors.white.withValues(alpha: 0.08),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Icon(
-            icon,
-            color: isActive ? const Color(0xFF6EE7B7) : Colors.white,
-            size: 19,
-          ),
-        ),
-        title: _isSidebarCollapsed
-            ? null
-            : Text(
-                label,
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: isActive ? FontWeight.w800 : FontWeight.w600,
-                  fontSize: 14,
-                ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          onTap: () => _selectMenu(menuKey),
+          borderRadius: BorderRadius.circular(12),
+          hoverColor: Colors.white.withValues(alpha: 0.08),
+          splashColor: _brandTeal.withValues(alpha: 0.12),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
+            height: 42,
+            padding: EdgeInsets.symmetric(
+              horizontal: _isSidebarCollapsed ? 8 : 10,
+            ),
+            decoration: BoxDecoration(
+              gradient: isActive
+                  ? LinearGradient(
+                      begin: Alignment.centerLeft,
+                      end: Alignment.centerRight,
+                      colors: [
+                        Colors.white.withValues(alpha: 0.18),
+                        _brandTeal.withValues(alpha: 0.12),
+                      ],
+                    )
+                  : null,
+              color: isActive ? null : Colors.transparent,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: isActive
+                    ? Colors.white.withValues(alpha: 0.16)
+                    : Colors.white.withValues(alpha: 0.04),
               ),
-        trailing: !_isSidebarCollapsed && isActive
-            ? Container(
-                width: 5,
-                height: 28,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF6EE7B7),
-                  borderRadius: BorderRadius.circular(999),
+              boxShadow: isActive
+                  ? [
+                      BoxShadow(
+                        color: _brandTeal.withValues(alpha: 0.20),
+                        blurRadius: 18,
+                        offset: const Offset(0, 8),
+                      ),
+                    ]
+                  : null,
+            ),
+            child: Row(
+              mainAxisAlignment: _isSidebarCollapsed
+                  ? MainAxisAlignment.center
+                  : MainAxisAlignment.start,
+              children: [
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  width: 28,
+                  height: 28,
+                  decoration: BoxDecoration(
+                    color: isActive
+                        ? _brandTeal.withValues(alpha: 0.22)
+                        : Colors.white.withValues(alpha: 0.07),
+                    borderRadius: BorderRadius.circular(9),
+                  ),
+                  child: Icon(
+                    icon,
+                    color: isActive
+                        ? const Color(0xFF86F7C8)
+                        : Colors.white.withValues(alpha: 0.78),
+                    size: 17,
+                  ),
                 ),
-              )
-            : null,
-        titleAlignment: ListTileTitleAlignment.center,
-        hoverColor: Colors.white.withValues(alpha: 0.08),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        visualDensity: _isSidebarCollapsed
-            ? VisualDensity.compact
-            : VisualDensity.standard,
-        minLeadingWidth: _isSidebarCollapsed ? 34 : null,
-        subtitle: null,
-        enabled: true,
-        selected: isActive,
-        selectedTileColor: Colors.transparent,
-        focusColor: Colors.white.withValues(alpha: 0.1),
-        mouseCursor: SystemMouseCursors.click,
-        onTap: () => _selectMenu(menuKey),
+                if (!_isSidebarCollapsed) ...[
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: isActive
+                            ? Colors.white
+                            : Colors.white.withValues(alpha: 0.76),
+                        fontFamily: 'Inter',
+                        fontWeight: isActive
+                            ? FontWeight.w800
+                            : FontWeight.w600,
+                        fontSize: 12.5,
+                        letterSpacing: 0,
+                      ),
+                    ),
+                  ),
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    width: 4,
+                    height: isActive ? 22 : 0,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF86F7C8),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
 
   Widget _buildSubMenuItem(String label, bool isActive, VoidCallback onTap) {
     if (_isSidebarCollapsed) return const SizedBox.shrink();
-    return Container(
-      margin: const EdgeInsets.only(left: 48, right: 12, top: 2, bottom: 2),
-      decoration: BoxDecoration(
-        color: isActive
-            ? _brandTeal.withValues(alpha: 0.16)
-            : Colors.transparent,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: ListTile(
-        dense: true,
-        visualDensity: VisualDensity.compact,
-        minLeadingWidth: 8,
-        leading: Icon(
-          Icons.circle,
-          size: 8,
-          color: isActive ? const Color(0xFF6EE7B7) : Colors.white54,
-        ),
-        title: Text(
-          label,
-          style: TextStyle(
-            color: isActive
-                ? Colors.white
-                : Colors.white.withValues(alpha: 0.7),
-            fontWeight: isActive ? FontWeight.w700 : FontWeight.w400,
-            fontSize: 13,
+    return Padding(
+      padding: const EdgeInsets.only(left: 48, right: 12, top: 2, bottom: 2),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(10),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(10),
+          hoverColor: Colors.white.withValues(alpha: 0.07),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            height: 32,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            decoration: BoxDecoration(
+              color: isActive
+                  ? _brandTeal.withValues(alpha: 0.15)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: isActive
+                    ? _brandTeal.withValues(alpha: 0.28)
+                    : Colors.transparent,
+              ),
+            ),
+            child: Row(
+              children: [
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 160),
+                  width: isActive ? 7 : 5,
+                  height: isActive ? 7 : 5,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: isActive
+                        ? const Color(0xFF86F7C8)
+                        : Colors.white.withValues(alpha: 0.42),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: isActive
+                          ? Colors.white
+                          : Colors.white.withValues(alpha: 0.66),
+                      fontFamily: 'Inter',
+                      fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
+                      fontSize: 11.5,
+                      letterSpacing: 0,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
-        onTap: onTap,
+      ),
+    );
+  }
+
+  Widget _buildSidebarSeparator() {
+    return Padding(
+      padding: EdgeInsets.symmetric(horizontal: _isSidebarCollapsed ? 16 : 18),
+      child: Container(
+        height: 1,
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              Colors.white.withValues(alpha: 0),
+              Colors.white.withValues(alpha: 0.14),
+              Colors.white.withValues(alpha: 0),
+            ],
+          ),
+        ),
       ),
     );
   }
