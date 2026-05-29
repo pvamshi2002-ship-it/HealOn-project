@@ -2826,7 +2826,7 @@ class _HomePageState extends State<HomePage> {
       );
 
       if (resp.statusCode == 204 || resp.statusCode == 200) {
-        _showNotification('Employee deleted');
+        _showNotification('Employeed');
         setState(() {
           _selectedEditEmployeeId = null;
           _editEmployeeDisplayNameCtrl.clear();
