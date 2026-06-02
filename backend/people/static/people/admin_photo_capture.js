@@ -206,7 +206,7 @@
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
       canvas.getContext('2d').drawImage(video, 0, 0);
-      var dataUrl = canvas.toDataURL('image/jpeg', 0.86);
+      var dataUrl = canvas.toDataURL('image/png');
       textarea.value = dataUrl;
       preview.src = dataUrl;
       message.textContent = 'Photo captured for check-in/check-out verification.';

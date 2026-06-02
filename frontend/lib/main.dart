@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:flutter/foundation.dart'
     show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
@@ -7,6 +8,9 @@ import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 
+import 'attendance_location_stub.dart'
+    if (dart.library.html) 'attendance_location_web.dart'
+    as attendance_location;
 import 'external_link.dart';
 import 'login_storage_stub.dart'
     if (dart.library.html) 'login_storage_web.dart'
@@ -25,6 +29,12 @@ final String backendUrl = () {
       (defaultTargetPlatform == TargetPlatform.android ||
           defaultTargetPlatform == TargetPlatform.iOS)) {
     return 'http://10.0.2.2:8000';
+  }
+  if (kIsWeb) {
+    final host = Uri.base.host;
+    if (host.isNotEmpty && host != 'localhost' && host != '127.0.0.1') {
+      return 'http://$host:8000';
+    }
   }
   return 'http://127.0.0.1:8000'; // For web
 }();
@@ -83,73 +93,6 @@ class AttendanceReport {
           .toList(),
     );
   }
-}
-
-class _LocationMapPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final roadPaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.55)
-      ..strokeWidth = 18
-      ..strokeCap = StrokeCap.round;
-    final minorRoadPaint = Paint()
-      ..color = _brandBlue.withValues(alpha: 0.08)
-      ..strokeWidth = 2;
-    final clinicPaint = Paint()
-      ..color = _medicalGreen.withValues(alpha: 0.18)
-      ..style = PaintingStyle.fill;
-
-    for (var x = 28.0; x < size.width; x += 58) {
-      canvas.drawLine(
-        Offset(x, 0),
-        Offset(x + 34, size.height),
-        minorRoadPaint,
-      );
-    }
-    for (var y = 28.0; y < size.height; y += 52) {
-      canvas.drawLine(Offset(0, y), Offset(size.width, y + 12), minorRoadPaint);
-    }
-
-    final mainPath = Path()
-      ..moveTo(-20, size.height * 0.76)
-      ..cubicTo(
-        size.width * 0.24,
-        size.height * 0.62,
-        size.width * 0.54,
-        size.height * 0.92,
-        size.width + 28,
-        size.height * 0.58,
-      );
-    canvas.drawPath(mainPath, roadPaint);
-
-    final crossPath = Path()
-      ..moveTo(size.width * 0.16, -16)
-      ..cubicTo(
-        size.width * 0.28,
-        size.height * 0.34,
-        size.width * 0.7,
-        size.height * 0.44,
-        size.width * 0.84,
-        size.height + 18,
-      );
-    canvas.drawPath(crossPath, roadPaint);
-
-    final buildings = [
-      Rect.fromLTWH(size.width * 0.1, size.height * 0.15, 48, 32),
-      Rect.fromLTWH(size.width * 0.68, size.height * 0.18, 58, 38),
-      Rect.fromLTWH(size.width * 0.12, size.height * 0.58, 54, 34),
-      Rect.fromLTWH(size.width * 0.72, size.height * 0.66, 46, 30),
-    ];
-    for (final rect in buildings) {
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(rect, const Radius.circular(8)),
-        clinicPaint,
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class AttendanceReportDay {
@@ -296,7 +239,7 @@ class _HomePageState extends State<HomePage> {
   String? _token;
   final _empIdCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
-  final _resetMobileCtrl = TextEditingController();
+  final _resetEmailCtrl = TextEditingController();
   final _resetOtpCtrl = TextEditingController();
   final _resetPassCtrl = TextEditingController();
   final _helpdeskIssueCtrl = TextEditingController();
@@ -329,9 +272,11 @@ class _HomePageState extends State<HomePage> {
   final _adminReportSearchCtrl = TextEditingController();
   final _locationNameCtrl = TextEditingController(text: 'Work Location');
   final _locationAddressCtrl = TextEditingController();
+  final _locationCoordinatesCtrl = TextEditingController();
   final _locationMapLinkCtrl = TextEditingController();
   final _locationRadiusCtrl = TextEditingController(text: '100');
   final _locationEmployeeSearchCtrl = TextEditingController();
+  final _locationSearchCtrl = TextEditingController();
   final _leaveCcCtrl = TextEditingController();
   final _leaveReasonCtrl = TextEditingController();
   final _regularizationCcCtrl = TextEditingController();
@@ -352,6 +297,8 @@ class _HomePageState extends State<HomePage> {
   bool _isResetLoading = false;
   bool _isEmployeeSaving = false;
   bool _isLocationSaving = false;
+  bool _isFaceSettingsSaving = false;
+  bool _faceRecognitionEnabled = false;
   bool _employeeCanAccessUser = true;
   bool _employeeCanAccessAdmin = false;
   bool _employeeCanAccessHr = false;
@@ -367,6 +314,16 @@ class _HomePageState extends State<HomePage> {
   bool _editEmployeeCanAccessHr = false;
   bool _showLocationAssignedPopup = false;
   bool _locationAttendanceEnabled = true;
+  bool _locationFaceVerificationEnabled = true;
+  bool _isLocationSearching = false;
+  bool _isLocationLocating = false;
+  bool _isUpdatingLocationCoordinates = false;
+  double _locationMapLatitude = 13.058889689752338;
+  double _locationMapLongitude = 77.54593290059762;
+  int _locationMapZoom = 16;
+  String _locationAddressPreview = 'Select address';
+  Timer? _locationReverseGeocodeTimer;
+  int _locationReverseGeocodeRequestId = 0;
   bool _showPassword = false;
   bool _isLoginPasswordEyePressed = false;
   bool _rememberMe = false;
@@ -502,6 +459,7 @@ class _HomePageState extends State<HomePage> {
     _employeeFullNameCtrl.addListener(_handleEmployeeFullNameChanged);
     _employeeDisplayNameCtrl.addListener(_handleEmployeeDisplayNameChanged);
     _employeeUsernameCtrl.addListener(_handleEmployeeUsernameChanged);
+    _locationCoordinatesCtrl.addListener(_handleLocationCoordinatesChanged);
     for (final controller in [
       _employeeDisplayNameCtrl,
       _employeeFullNameCtrl,
@@ -844,9 +802,11 @@ class _HomePageState extends State<HomePage> {
     ]) {
       controller.removeListener(_refreshEmployeePreview);
     }
+    _locationCoordinatesCtrl.removeListener(_handleLocationCoordinatesChanged);
+    _locationReverseGeocodeTimer?.cancel();
     _empIdCtrl.dispose();
     _passCtrl.dispose();
-    _resetMobileCtrl.dispose();
+    _resetEmailCtrl.dispose();
     _resetOtpCtrl.dispose();
     _resetPassCtrl.dispose();
     _helpdeskIssueCtrl.dispose();
@@ -879,9 +839,11 @@ class _HomePageState extends State<HomePage> {
     _adminReportSearchCtrl.dispose();
     _locationNameCtrl.dispose();
     _locationAddressCtrl.dispose();
+    _locationCoordinatesCtrl.dispose();
     _locationMapLinkCtrl.dispose();
     _locationRadiusCtrl.dispose();
     _locationEmployeeSearchCtrl.dispose();
+    _locationSearchCtrl.dispose();
     _leaveCcCtrl.dispose();
     _leaveReasonCtrl.dispose();
     _regularizationCcCtrl.dispose();
@@ -933,6 +895,65 @@ class _HomePageState extends State<HomePage> {
       return jsonDecode(resp.body) as Map<String, dynamic>;
     }
     throw Exception('Request failed: ${resp.statusCode}');
+  }
+
+  Future<void> _loadAttendanceSettings() async {
+    if (_token == null || (!_isAdminRole && !_isHrRole)) {
+      return;
+    }
+    final settings = await _apiGet('/api/admin/attendance-settings/');
+    if (!mounted || settings == null) return;
+    setState(() {
+      _faceRecognitionEnabled = settings['face_recognition_enabled'] == true;
+    });
+  }
+
+  Future<void> _saveFaceRecognitionEnabled(bool enabled) async {
+    if (_token == null) {
+      return;
+    }
+    setState(() {
+      _isFaceSettingsSaving = true;
+      _faceRecognitionEnabled = enabled;
+    });
+    try {
+      final resp = await http.patch(
+        Uri.parse('$backendUrl/api/admin/attendance-settings/'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Token $_token',
+        },
+        body: jsonEncode({
+          'face_recognition_enabled': enabled,
+          'require_face_verification': enabled,
+        }),
+      );
+      if (resp.statusCode == 200) {
+        final body = jsonDecode(resp.body) as Map<String, dynamic>;
+        setState(() {
+          _faceRecognitionEnabled = body['face_recognition_enabled'] == true;
+        });
+        _showNotification(
+          enabled ? 'Face verification required' : 'Face verification disabled',
+        );
+      } else {
+        setState(() => _faceRecognitionEnabled = !enabled);
+        _showNotification(
+          _responseMessage(resp, 'Unable to save face recognition setting'),
+          isError: true,
+        );
+      }
+    } catch (e) {
+      setState(() => _faceRecognitionEnabled = !enabled);
+      _showNotification(
+        'Unable to save face recognition setting: $e',
+        isError: true,
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isFaceSettingsSaving = false);
+      }
+    }
   }
 
   String _responseMessage(http.Response resp, String fallback) {
@@ -1041,8 +1062,12 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> requestPasswordReset(StateSetter dialogSetState) async {
-    if (_resetMobileCtrl.text.trim().isEmpty) {
-      dialogSetState(() => _resetMessage = 'Please enter mobile number');
+    if (_resetEmailCtrl.text.trim().isEmpty) {
+      dialogSetState(() => _resetMessage = 'Please enter registered email');
+      return;
+    }
+    if (!_resetEmailCtrl.text.trim().contains('@')) {
+      dialogSetState(() => _resetMessage = 'Please enter a valid email');
       return;
     }
 
@@ -1051,32 +1076,37 @@ class _HomePageState extends State<HomePage> {
       _resetMessage = null;
     });
 
-    final resp = await http.post(
-      Uri.parse('$backendUrl/api/password-reset/request/'),
-      body: {'mobile_number': _resetMobileCtrl.text.trim()},
-    );
+    try {
+      final resp = await http.post(
+        Uri.parse('$backendUrl/api/password-reset/request/'),
+        body: {'email': _resetEmailCtrl.text.trim()},
+      );
 
-    dialogSetState(() {
-      _isResetLoading = false;
-      if (resp.statusCode == 200) {
-        final body = jsonDecode(resp.body) as Map<String, dynamic>;
-        _resetStep = 1;
-        final devOtp = body['dev_otp'] ?? body['otp'];
-        final smsDelivered = body['sms_delivered'] == true;
-        if (smsDelivered) {
-          _resetMessage =
-              'HealOn password reset OTP sent to your mobile number.';
-        } else if (devOtp != null) {
-          _resetMessage =
-              'SMS provider is not configured. Use dev OTP: $devOtp';
+      dialogSetState(() {
+        _isResetLoading = false;
+        if (resp.statusCode == 200) {
+          _resetStep = 1;
+          _resetOtpCtrl.clear();
+          _resetMessage = _responseMessage(
+            resp,
+            'OTP sent to your registered email address.',
+          );
         } else {
-          _resetMessage =
-              'OTP generated, but SMS provider is not configured on backend.';
+          _resetMessage = _responseMessage(resp, 'Unable to start OTP');
         }
-      } else {
-        _resetMessage = _responseMessage(resp, 'Unable to send OTP');
-      }
-    });
+      });
+    } on http.ClientException {
+      dialogSetState(() {
+        _isResetLoading = false;
+        _resetMessage =
+            'Unable to reach HealOn server at $backendUrl. Please make sure the backend is running and refresh.';
+      });
+    } catch (e) {
+      dialogSetState(() {
+        _isResetLoading = false;
+        _resetMessage = 'Unable to start OTP: $e';
+      });
+    }
   }
 
   Future<void> verifyPasswordResetOtp(StateSetter dialogSetState) async {
@@ -1090,23 +1120,36 @@ class _HomePageState extends State<HomePage> {
       _resetMessage = null;
     });
 
-    final resp = await http.post(
-      Uri.parse('$backendUrl/api/password-reset/verify/'),
-      body: {
-        'mobile_number': _resetMobileCtrl.text.trim(),
-        'otp': _resetOtpCtrl.text.trim(),
-      },
-    );
+    try {
+      final resp = await http.post(
+        Uri.parse('$backendUrl/api/password-reset/verify/'),
+        body: {
+          'email': _resetEmailCtrl.text.trim(),
+          'otp': _resetOtpCtrl.text.trim(),
+        },
+      );
 
-    dialogSetState(() {
-      _isResetLoading = false;
-      if (resp.statusCode == 200) {
-        _resetStep = 2;
-        _resetMessage = 'OTP verified. Enter new password.';
-      } else {
-        _resetMessage = _responseMessage(resp, 'Invalid OTP');
-      }
-    });
+      dialogSetState(() {
+        _isResetLoading = false;
+        if (resp.statusCode == 200) {
+          _resetStep = 2;
+          _resetMessage = 'OTP verified. Enter new password.';
+        } else {
+          _resetMessage = _responseMessage(resp, 'Invalid OTP');
+        }
+      });
+    } on http.ClientException {
+      dialogSetState(() {
+        _isResetLoading = false;
+        _resetMessage =
+            'Unable to reach HealOn server at $backendUrl. Please make sure the backend is running and refresh.';
+      });
+    } catch (e) {
+      dialogSetState(() {
+        _isResetLoading = false;
+        _resetMessage = 'Unable to verify OTP: $e';
+      });
+    }
   }
 
   Future<void> confirmPasswordReset(StateSetter dialogSetState) async {
@@ -1121,24 +1164,38 @@ class _HomePageState extends State<HomePage> {
       _resetMessage = null;
     });
 
-    final resp = await http.post(
-      Uri.parse('$backendUrl/api/password-reset/confirm/'),
-      body: {
-        'mobile_number': _resetMobileCtrl.text.trim(),
-        'otp': _resetOtpCtrl.text.trim(),
-        'new_password': _resetPassCtrl.text,
-      },
-    );
+    try {
+      final resp = await http.post(
+        Uri.parse('$backendUrl/api/password-reset/confirm/'),
+        body: {
+          'email': _resetEmailCtrl.text.trim(),
+          'new_password': _resetPassCtrl.text,
+        },
+      );
 
-    dialogSetState(() => _isResetLoading = false);
-    if (resp.statusCode == 200) {
-      if (mounted) {
-        Navigator.of(context).pop();
-        setState(() => _status = 'Password reset successfully. Please login.');
+      dialogSetState(() => _isResetLoading = false);
+      if (resp.statusCode == 200) {
+        if (mounted) {
+          Navigator.of(context).pop();
+          setState(
+            () => _status = 'Password reset successfully. Please login.',
+          );
+        }
+      } else {
+        dialogSetState(() {
+          _resetMessage = _responseMessage(resp, 'Unable to reset password');
+        });
       }
-    } else {
+    } on http.ClientException {
       dialogSetState(() {
-        _resetMessage = _responseMessage(resp, 'Unable to reset password');
+        _isResetLoading = false;
+        _resetMessage =
+            'Unable to reach HealOn server at $backendUrl. Please make sure the backend is running and refresh.';
+      });
+    } catch (e) {
+      dialogSetState(() {
+        _isResetLoading = false;
+        _resetMessage = 'Unable to reset password: $e';
       });
     }
   }
@@ -1157,7 +1214,7 @@ class _HomePageState extends State<HomePage> {
     setState(() {
       _resetStep = 0;
       _resetMessage = null;
-      _resetMobileCtrl.clear();
+      _resetEmailCtrl.clear();
       _resetOtpCtrl.clear();
       _resetPassCtrl.clear();
     });
@@ -1181,10 +1238,10 @@ class _HomePageState extends State<HomePage> {
                   children: [
                     if (_resetStep == 0)
                       TextField(
-                        controller: _resetMobileCtrl,
-                        keyboardType: TextInputType.phone,
+                        controller: _resetEmailCtrl,
+                        keyboardType: TextInputType.emailAddress,
                         decoration: const InputDecoration(
-                          labelText: 'Registered Mobile Number',
+                          labelText: 'Registered Email',
                           border: OutlineInputBorder(),
                         ),
                       )
@@ -1224,6 +1281,13 @@ class _HomePageState extends State<HomePage> {
                       : () => Navigator.of(dialogContext).pop(),
                   child: const Text('Cancel'),
                 ),
+                if (_resetStep == 1)
+                  TextButton(
+                    onPressed: _isResetLoading
+                        ? null
+                        : () => requestPasswordReset(dialogSetState),
+                    child: const Text('Resend OTP'),
+                  ),
                 ElevatedButton(
                   onPressed: _isResetLoading
                       ? null
@@ -1267,6 +1331,7 @@ class _HomePageState extends State<HomePage> {
         final dashboard = await _apiGet('/api/admin/dashboard/');
         final employees = await _apiGet('/api/admin/employees/');
         final attendance = await _apiGet('/api/admin/attendance/');
+        final settings = await _apiGet('/api/admin/attendance-settings/');
         if (!mounted) {
           return;
         }
@@ -1274,12 +1339,15 @@ class _HomePageState extends State<HomePage> {
           _adminDashboard = dashboard;
           _adminEmployees = employees?['employees'] as List<dynamic>? ?? [];
           _adminAttendance = attendance;
+          _faceRecognitionEnabled =
+              settings?['face_recognition_enabled'] == true;
         });
         await _loadAdminTasks();
       } else if (_isHrRole) {
         final dashboard = await _apiGet('/api/admin/dashboard/');
         final employees = await _apiGet('/api/admin/employees/');
         final attendance = await _apiGet('/api/admin/attendance/');
+        final settings = await _apiGet('/api/admin/attendance-settings/');
         final userDashboard = await _apiGet('/api/dashboard/');
         final leaves = await _apiGet('/api/employee/leaves/');
         final tasks = await _apiGet('/api/employee/tasks/');
@@ -1292,6 +1360,8 @@ class _HomePageState extends State<HomePage> {
           _adminDashboard = dashboard;
           _adminEmployees = employees?['employees'] as List<dynamic>? ?? [];
           _adminAttendance = attendance;
+          _faceRecognitionEnabled =
+              settings?['face_recognition_enabled'] == true;
           _userDashboard = userDashboard;
           if (leaves?['summary'] is Map<String, dynamic>) {
             _userDashboard?['leaves'] = leaves?['summary'];
@@ -1393,15 +1463,37 @@ class _HomePageState extends State<HomePage> {
       return null;
     }
 
-    return Geolocator.getCurrentPosition(
-      desiredAccuracy: LocationAccuracy.high,
-    );
+    try {
+      return await attendance_location.getFreshAttendancePosition();
+    } on TimeoutException {
+      _showNotification(
+        'Unable to get fresh live GPS coordinates. Please try again.',
+        isError: true,
+      );
+      return null;
+    } catch (e) {
+      _showNotification('Unable to fetch live GPS: $e', isError: true);
+      return null;
+    }
   }
 
   bool get _isAttendanceLocationRestrictionEnabled {
     final assignedLocation =
         _currentUser?['assigned_location'] as Map<String, dynamic>?;
     return assignedLocation?['is_active'] == true;
+  }
+
+  bool get _isAttendanceFaceVerificationRequired {
+    final settings =
+        _userDashboard?['attendance_settings'] as Map<String, dynamic>?;
+    if (settings != null) {
+      return settings['face_verification_required'] == true ||
+          settings['face_recognition_enabled'] == true;
+    }
+    final assignedLocation =
+        _currentUser?['assigned_location'] as Map<String, dynamic>?;
+    return _faceRecognitionEnabled &&
+        (assignedLocation?['face_verification_enabled'] != false);
   }
 
   Future<Map<String, dynamic>?> _buildAttendancePayload(
@@ -1418,19 +1510,24 @@ class _HomePageState extends State<HomePage> {
       return null;
     }
     body.addAll({
-      'latitude': pos.latitude.toStringAsFixed(6),
-      'longitude': pos.longitude.toStringAsFixed(6),
+      'latitude': pos.latitude.toString(),
+      'longitude': pos.longitude.toString(),
       'accuracy': pos.accuracy,
+      'position_timestamp': pos.timestamp.toUtc().toIso8601String(),
+      'location_captured_at': DateTime.now().toUtc().toIso8601String(),
     });
     return body;
   }
 
   Future<String?> _captureAttendancePhoto(String actionLabel) async {
-    _showNotification('Capture your photo biometric to $actionLabel');
+    final mode = _isAttendanceFaceVerificationRequired
+        ? 'face verification'
+        : 'attendance photo';
+    _showNotification('Capture your $mode to $actionLabel');
     final photo = await photo_biometric.pickPhotoBiometric();
     if (photo == null || photo.isEmpty) {
       _showNotification(
-        'Photo biometric is required to $actionLabel',
+        'Photo capture is required to $actionLabel',
         isError: true,
       );
       return null;
@@ -1519,8 +1616,10 @@ class _HomePageState extends State<HomePage> {
         await loadAttendanceReport();
       }
     } else {
-      final detail = _responseDetail(resp.body);
-      _showNotification('Check-out failed: $detail', isError: true);
+      _showNotification(
+        _attendanceFailureMessage('Check-out', resp),
+        isError: true,
+      );
     }
   }
 
@@ -2615,7 +2714,9 @@ class _HomePageState extends State<HomePage> {
   }
 
   int _employeeId(Map<String, dynamic> employee) {
-    return (employee['id'] as num?)?.toInt() ?? 0;
+    final rawId = employee['id'];
+    if (rawId is num) return rawId.toInt();
+    return int.tryParse(rawId?.toString() ?? '') ?? 0;
   }
 
   String _employeeDisplayName(Map<String, dynamic> employee) {
@@ -2962,12 +3063,30 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _selectLocationEmployee(int? employeeId) {
+    if (employeeId == null || employeeId == 0) {
+      setState(() {
+        _selectedLocationEmployeeId = null;
+        _locationEmployeeSearchCtrl.clear();
+      });
+      return;
+    }
     final employee = _adminEmployees
         .whereType<Map<String, dynamic>>()
         .firstWhere(
           (item) => _employeeId(item) == employeeId,
           orElse: () => <String, dynamic>{},
         );
+    if (employee.isEmpty) {
+      setState(() {
+        _selectedLocationEmployeeId = null;
+        _locationEmployeeSearchCtrl.clear();
+      });
+      _showNotification(
+        'Selected employee could not be loaded. Refresh employees and try again.',
+        isError: true,
+      );
+      return;
+    }
     final location = employee['assigned_location'] as Map<String, dynamic>?;
     setState(() {
       _selectedLocationEmployeeId = employeeId;
@@ -2976,11 +3095,19 @@ class _HomePageState extends State<HomePage> {
           ? location!['name'].toString()
           : 'Work Location';
       _locationAddressCtrl.text = location?['address']?.toString() ?? '';
+      final savedLatitude = location?['latitude']?.toString() ?? '';
+      final savedLongitude = location?['longitude']?.toString() ?? '';
+      _locationCoordinatesCtrl.text = _locationCoordinateText(
+        savedLatitude,
+        savedLongitude,
+      );
       _locationMapLinkCtrl.text = location?['map_url']?.toString() ?? '';
       _locationRadiusCtrl.text =
           location?['radius_meters']?.toString() ?? '100';
       _locationEmployeeSearchCtrl.text = _employeeDisplayName(employee);
       _locationAttendanceEnabled = location?['is_active'] as bool? ?? true;
+      _locationFaceVerificationEnabled =
+          location?['face_verification_enabled'] as bool? ?? true;
       _locationEffectiveFrom = DateTime.tryParse(
         location?['effective_from']?.toString() ?? '',
       );
@@ -2988,6 +3115,293 @@ class _HomePageState extends State<HomePage> {
         location?['effective_to']?.toString() ?? '',
       );
     });
+    final coordinates = _parseLocationCoordinates(
+      _locationCoordinatesCtrl.text,
+    );
+    if (coordinates != null) {
+      _setLocationPin(
+        coordinates.latitude,
+        coordinates.longitude,
+        address: _locationAddressCtrl.text,
+        reverseGeocode: _locationAddressCtrl.text.trim().isEmpty,
+      );
+    }
+  }
+
+  String _trimCoordinateZeros(String value) {
+    if (!value.contains('.')) return value;
+    return value
+        .replaceFirst(RegExp(r'0+$'), '')
+        .replaceFirst(RegExp(r'\.$'), '');
+  }
+
+  String _locationCoordinateText(String latitude, String longitude) {
+    final lat = _trimCoordinateZeros(latitude.trim());
+    final lon = _trimCoordinateZeros(longitude.trim());
+    if (lat.isEmpty || lon.isEmpty || (lat == '0' && lon == '0')) {
+      return '';
+    }
+    return '$lat,$lon';
+  }
+
+  ({double latitude, double longitude})? _parseLocationCoordinates(
+    String value,
+  ) {
+    final match = RegExp(
+      r'^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$',
+    ).firstMatch(value);
+    if (match == null) return null;
+    final latitude = double.tryParse(match.group(1)!);
+    final longitude = double.tryParse(match.group(2)!);
+    if (latitude == null || longitude == null) return null;
+    if (latitude < -90 ||
+        latitude > 90 ||
+        longitude < -180 ||
+        longitude > 180) {
+      return null;
+    }
+    return (latitude: latitude, longitude: longitude);
+  }
+
+  String _formatLocationCoordinate(double value) {
+    return value
+        .toStringAsFixed(15)
+        .replaceFirst(RegExp(r'0+$'), '')
+        .replaceFirst(RegExp(r'\.$'), '');
+  }
+
+  String _formatLocationCoordinatePair(double latitude, double longitude) {
+    return '${_formatLocationCoordinate(latitude)},${_formatLocationCoordinate(longitude)}';
+  }
+
+  void _handleLocationCoordinatesChanged() {
+    if (_isUpdatingLocationCoordinates) return;
+    final coordinates = _parseLocationCoordinates(
+      _locationCoordinatesCtrl.text,
+    );
+    if (coordinates == null) {
+      setState(() {});
+      return;
+    }
+    setState(() {
+      _locationMapLatitude = coordinates.latitude;
+      _locationMapLongitude = coordinates.longitude;
+      _locationAddressPreview = _locationAddressCtrl.text.trim().isEmpty
+          ? 'Resolving address...'
+          : _locationAddressCtrl.text.trim();
+    });
+    _scheduleLocationReverseGeocode();
+  }
+
+  void _setLocationPin(
+    double latitude,
+    double longitude, {
+    String? address,
+    bool fillAddress = false,
+    bool reverseGeocode = true,
+  }) {
+    final normalizedLatitude = latitude.clamp(-90.0, 90.0).toDouble();
+    final normalizedLongitude = longitude.clamp(-180.0, 180.0).toDouble();
+    final coordinateText = _formatLocationCoordinatePair(
+      normalizedLatitude,
+      normalizedLongitude,
+    );
+    _isUpdatingLocationCoordinates = true;
+    _locationCoordinatesCtrl.text = coordinateText;
+    _locationCoordinatesCtrl.selection = TextSelection.collapsed(
+      offset: coordinateText.length,
+    );
+    _isUpdatingLocationCoordinates = false;
+    setState(() {
+      _locationMapLatitude = normalizedLatitude;
+      _locationMapLongitude = normalizedLongitude;
+      if (address != null && address.trim().isNotEmpty) {
+        _locationAddressPreview = address.trim();
+        if (fillAddress || _locationAddressCtrl.text.trim().isEmpty) {
+          _locationAddressCtrl.text = address.trim();
+        }
+      } else {
+        _locationAddressPreview = 'Resolving address...';
+      }
+    });
+    if (reverseGeocode) {
+      _scheduleLocationReverseGeocode();
+    }
+  }
+
+  Future<void> _searchLocationOnMap() async {
+    final query = _locationSearchCtrl.text.trim().isNotEmpty
+        ? _locationSearchCtrl.text.trim()
+        : _locationAddressCtrl.text.trim();
+    if (query.isEmpty) {
+      _showNotification('Enter a location to search', isError: true);
+      return;
+    }
+    setState(() => _isLocationSearching = true);
+    try {
+      final uri = Uri.https('nominatim.openstreetmap.org', '/search', {
+        'q': query,
+        'format': 'jsonv2',
+        'limit': '1',
+      });
+      final response = await http.get(uri);
+      if (response.statusCode != 200) {
+        _showNotification('Location search failed', isError: true);
+        return;
+      }
+      final results = jsonDecode(response.body);
+      if (results is! List || results.isEmpty) {
+        _showNotification(
+          'No map result found for this address',
+          isError: true,
+        );
+        return;
+      }
+      final result = results.first as Map<String, dynamic>;
+      final latitude = double.tryParse(result['lat']?.toString() ?? '');
+      final longitude = double.tryParse(result['lon']?.toString() ?? '');
+      if (latitude == null || longitude == null) {
+        _showNotification(
+          'Map result did not include coordinates',
+          isError: true,
+        );
+        return;
+      }
+      final displayName = result['display_name']?.toString() ?? query;
+      _setLocationPin(
+        latitude,
+        longitude,
+        address: displayName,
+        fillAddress: true,
+        reverseGeocode: false,
+      );
+      setState(() => _locationMapZoom = math.max(_locationMapZoom, 16));
+    } catch (e) {
+      _showNotification('Unable to search location: $e', isError: true);
+    } finally {
+      if (mounted) setState(() => _isLocationSearching = false);
+    }
+  }
+
+  Future<void> _useCurrentLocationForOffice() async {
+    setState(() => _isLocationLocating = true);
+    try {
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        _showNotification('Location permission is required', isError: true);
+        return;
+      }
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+        timeLimit: const Duration(seconds: 15),
+      );
+      _setLocationPin(position.latitude, position.longitude);
+      setState(() => _locationMapZoom = math.max(_locationMapZoom, 17));
+    } catch (e) {
+      _showNotification('Unable to get current location: $e', isError: true);
+    } finally {
+      if (mounted) setState(() => _isLocationLocating = false);
+    }
+  }
+
+  void _scheduleLocationReverseGeocode() {
+    _locationReverseGeocodeTimer?.cancel();
+    final requestId = ++_locationReverseGeocodeRequestId;
+    final latitude = _locationMapLatitude;
+    final longitude = _locationMapLongitude;
+    _locationReverseGeocodeTimer = Timer(const Duration(milliseconds: 450), () {
+      _reverseGeocodeLocationPin(requestId, latitude, longitude);
+    });
+  }
+
+  Future<void> _reverseGeocodeLocationPin(
+    int requestId,
+    double latitude,
+    double longitude,
+  ) async {
+    try {
+      final uri = Uri.https('nominatim.openstreetmap.org', '/reverse', {
+        'lat': _formatLocationCoordinate(latitude),
+        'lon': _formatLocationCoordinate(longitude),
+        'format': 'jsonv2',
+        'zoom': '18',
+        'addressdetails': '1',
+      });
+      final response = await http.get(uri);
+      if (!mounted || requestId != _locationReverseGeocodeRequestId) return;
+      if (response.statusCode != 200) return;
+      final data = jsonDecode(response.body);
+      final displayName = data is Map<String, dynamic>
+          ? data['display_name']?.toString()
+          : null;
+      if (displayName == null || displayName.isEmpty) return;
+      setState(() {
+        _locationAddressPreview = displayName;
+        if (_locationAddressCtrl.text.trim().isEmpty) {
+          _locationAddressCtrl.text = displayName;
+        }
+      });
+    } catch (_) {
+      if (mounted && requestId == _locationReverseGeocodeRequestId) {
+        setState(() {
+          _locationAddressPreview = _locationCoordinatesCtrl.text.trim();
+        });
+      }
+    }
+  }
+
+  void _changeLocationMapZoom(int delta) {
+    setState(() {
+      _locationMapZoom = (_locationMapZoom + delta).clamp(3, 19);
+    });
+  }
+
+  Offset _latLonToWorldPixel(double latitude, double longitude, int zoom) {
+    final sinLatitude = math
+        .sin(latitude * math.pi / 180)
+        .clamp(-0.9999, 0.9999);
+    final scale = 256.0 * math.pow(2.0, zoom);
+    final x = (longitude + 180.0) / 360.0 * scale;
+    final y =
+        (0.5 -
+            math.log((1 + sinLatitude) / (1 - sinLatitude)) / (4 * math.pi)) *
+        scale;
+    return Offset(x, y);
+  }
+
+  ({double latitude, double longitude}) _worldPixelToLatLon(
+    Offset pixel,
+    int zoom,
+  ) {
+    final scale = 256.0 * math.pow(2.0, zoom);
+    final longitude = pixel.dx / scale * 360.0 - 180.0;
+    final n = math.pi - 2.0 * math.pi * pixel.dy / scale;
+    final latitude =
+        180.0 / math.pi * math.atan(0.5 * (math.exp(n) - math.exp(-n)));
+    return (
+      latitude: latitude.clamp(-85.05112878, 85.05112878).toDouble(),
+      longitude: ((longitude + 540.0) % 360.0) - 180.0,
+    );
+  }
+
+  ({double latitude, double longitude}) _locationFromMapLocalPosition(
+    Size size,
+    Offset localPosition,
+  ) {
+    final center = _latLonToWorldPixel(
+      _locationMapLatitude,
+      _locationMapLongitude,
+      _locationMapZoom,
+    );
+    final target = Offset(
+      center.dx + localPosition.dx - size.width / 2,
+      center.dy + localPosition.dy - size.height / 2,
+    );
+    return _worldPixelToLatLon(target, _locationMapZoom);
   }
 
   Future<void> _saveEmployeeLocation() async {
@@ -2996,6 +3410,8 @@ class _HomePageState extends State<HomePage> {
         ? 'Work Location'
         : _locationNameCtrl.text.trim();
     final address = _locationAddressCtrl.text.trim();
+    final latitudeLongitude = _locationCoordinatesCtrl.text.trim();
+    final coordinates = _parseLocationCoordinates(latitudeLongitude);
     final mapOrExtraAddress = _locationMapLinkCtrl.text.trim();
     final savedAddress = address.isNotEmpty
         ? address
@@ -3011,6 +3427,17 @@ class _HomePageState extends State<HomePage> {
     }
     if (_locationAttendanceEnabled && savedAddress.isEmpty) {
       _showNotification('Enter the assigned work address', isError: true);
+      return;
+    }
+    if (savedAddress.isEmpty) {
+      _showNotification('Enter the office address', isError: true);
+      return;
+    }
+    if (coordinates == null) {
+      _showNotification(
+        'Select a valid map pin or enter latitude,longitude',
+        isError: true,
+      );
       return;
     }
     if (radius <= 0) {
@@ -3038,6 +3465,10 @@ class _HomePageState extends State<HomePage> {
         body: jsonEncode({
           'name': locationName,
           'address': savedAddress,
+          'latitude_longitude': _formatLocationCoordinatePair(
+            coordinates.latitude,
+            coordinates.longitude,
+          ),
           'map_url': mapLink,
           'extra_location_text': mapOrExtraAddress,
           'radius_meters': radius,
@@ -3048,14 +3479,15 @@ class _HomePageState extends State<HomePage> {
               ? null
               : _dateQuery(_locationEffectiveTo!),
           'is_active': _locationAttendanceEnabled,
+          'face_verification_enabled': _locationFaceVerificationEnabled,
         }),
       );
 
       if (resp.statusCode == 200) {
         _showNotification(
           _locationAttendanceEnabled
-              ? 'Location Assigned Successfully'
-              : 'Location Disabled for Employee',
+              ? 'Location settings updated'
+              : 'Location disabled for employee',
           duration: const Duration(seconds: 3),
         );
         setState(() => _showLocationAssignedPopup = true);
@@ -3117,9 +3549,31 @@ class _HomePageState extends State<HomePage> {
         await loadAttendanceReport();
       }
     } else {
-      final detail = _responseDetail(resp.body);
-      _showNotification('Check-in failed: $detail', isError: true);
+      _showNotification(
+        _attendanceFailureMessage('Check-in', resp),
+        isError: true,
+      );
     }
+  }
+
+  String _attendanceFailureMessage(String actionLabel, http.Response resp) {
+    final body = _responseBodyMap(resp.body);
+    final detail = body?['detail']?.toString() ?? _responseDetail(resp.body);
+    if (detail == 'Face not matched' &&
+        body?['face_recognition_enabled'] == true) {
+      return 'Face not matched';
+    }
+    return '$actionLabel failed: $detail';
+  }
+
+  Map<String, dynamic>? _responseBodyMap(String body) {
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map<String, dynamic>) {
+        return decoded;
+      }
+    } catch (_) {}
+    return null;
   }
 
   String _responseDetail(String body) {
@@ -3132,7 +3586,11 @@ class _HomePageState extends State<HomePage> {
         }
       }
     } catch (_) {}
-    return 'Please try again';
+    final trimmed = body.trim();
+    if (trimmed.isNotEmpty && !trimmed.startsWith('<!DOCTYPE html>')) {
+      return trimmed.length > 180 ? '${trimmed.substring(0, 180)}...' : trimmed;
+    }
+    return 'Server error. Please retry after the backend reloads.';
   }
 
   String _attendanceBiometricDetails(String body) {
@@ -3140,14 +3598,28 @@ class _HomePageState extends State<HomePage> {
       final decoded = jsonDecode(body);
       if (decoded is Map<String, dynamic>) {
         final details = decoded['biometric_details'];
-        if (details is Map<String, dynamic> &&
-            details['verified'] == true &&
-            details['size_bytes'] != null) {
-          return 'photo biometric verified';
+        if (details is Map<String, dynamic> && details['verified'] == true) {
+          final faceRequired =
+              details['face_verification_required'] == true ||
+              details['face_recognition_enabled'] == true;
+          if (faceRequired) {
+            final match = details['face_match_details'];
+            if (match is Map<String, dynamic> && match['matched'] == true) {
+              return 'face verified';
+            }
+            return 'photo biometric verified';
+          }
+          return 'photo captured';
         }
       }
     } catch (_) {}
     return '';
+  }
+
+  String get _attendanceCaptureLabel {
+    return _isAttendanceFaceVerificationRequired
+        ? 'biometric verification'
+        : 'attendance photo';
   }
 
   Future<void> loadAttendanceReport() async {
@@ -3396,11 +3868,16 @@ class _HomePageState extends State<HomePage> {
       _selectMenu(menuKey);
       return;
     }
+    final nextExpandedMenu =
+        _expandedSidebarMenu == menuKey && !_isSidebarCollapsed ? '' : menuKey;
+    if (!_isSidebarCollapsed && _expandedSidebarMenu == nextExpandedMenu) {
+      return;
+    }
     setState(() {
       if (_isSidebarCollapsed) {
         _isSidebarCollapsed = false;
       }
-      _expandedSidebarMenu = _expandedSidebarMenu == menuKey ? '' : menuKey;
+      _expandedSidebarMenu = nextExpandedMenu;
     });
   }
 
@@ -4318,13 +4795,13 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildLoginHelpdesk() {
     return Positioned(
-      left: 24,
       right: 24,
       bottom: 20,
       child: Align(
-        alignment: Alignment.bottomCenter,
+        alignment: Alignment.bottomRight,
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             if (_showLoginHelpdesk) ...[
               Container(
@@ -4610,7 +5087,7 @@ class _HomePageState extends State<HomePage> {
                             'Attendance',
                           ),
 
-                          if (_expandedSidebarMenu == 'Attendance') ...[
+                          _buildSubMenuGroup('Attendance', [
                             _buildSubMenuItem(
                               'Daily Attendance',
                               _selectedAttendanceSection == 'Daily Attendance',
@@ -4626,7 +5103,7 @@ class _HomePageState extends State<HomePage> {
                                 'Regularization Attendance',
                               ),
                             ),
-                          ],
+                          ]),
 
                           // LEAVES
                           _buildMenuItem(
@@ -4635,7 +5112,7 @@ class _HomePageState extends State<HomePage> {
                             'Leaves',
                           ),
 
-                          if (_expandedSidebarMenu == 'Leaves') ...[
+                          _buildSubMenuGroup('Leaves', [
                             _buildSubMenuItem(
                               'Apply Leave',
                               _selectedLeaveSection == 'Apply Leave',
@@ -4653,21 +5130,21 @@ class _HomePageState extends State<HomePage> {
                               _selectedLeaveSection == 'Leave Overview',
                               () => _selectLeaveSection('Leave Overview'),
                             ),
-                          ],
+                          ]),
 
                           _buildMenuItem('Tasks', Icons.task, 'Tasks'),
-                          if (_expandedSidebarMenu == 'Tasks') ...[
+                          _buildSubMenuGroup('Tasks', [
                             _buildSubMenuItem(
                               'Pending Tasks',
                               _selectedTaskSection == 'Pending Tasks',
                               () => _selectTaskSection('Pending Tasks'),
                             ),
-                          ],
+                          ]),
 
                           // SALARY
                           _buildMenuItem('Salary', Icons.payment, 'Salary'),
 
-                          if (_expandedSidebarMenu == 'Salary') ...[
+                          _buildSubMenuGroup('Salary', [
                             _buildSubMenuItem(
                               'Payslips',
                               _selectedSalarySection == 'Payslips',
@@ -4699,16 +5176,16 @@ class _HomePageState extends State<HomePage> {
                               _selectedSalarySection == 'Reimbursement',
                               () => _selectSalarySection('Reimbursement'),
                             ),
-                          ],
+                          ]),
 
                           _buildMenuItem('Helpdesk', Icons.help, 'Helpdesk'),
-                          if (_expandedSidebarMenu == 'Helpdesk') ...[
+                          _buildSubMenuGroup('Helpdesk', [
                             _buildSubMenuItem(
                               'Help Desk',
                               _selectedMenu == 'Helpdesk',
                               () => _selectMenu('Helpdesk'),
                             ),
-                          ],
+                          ]),
                         ],
 
                         // ================= HR PANEL =================
@@ -4718,8 +5195,7 @@ class _HomePageState extends State<HomePage> {
                             Icons.groups,
                             'Employee Management',
                           ),
-                          if (_expandedSidebarMenu ==
-                              'Employee Management') ...[
+                          _buildSubMenuGroup('Employee Management', [
                             _buildSubMenuItem(
                               'Add Employee',
                               _selectedAttendanceSection == 'Add Employee',
@@ -4755,25 +5231,13 @@ class _HomePageState extends State<HomePage> {
                                 });
                               },
                             ),
-                            _buildSubMenuItem(
-                              'Employee List',
-                              _selectedAttendanceSection == 'Employee List',
-                              () {
-                                setState(() {
-                                  _selectedMenu = 'Employee Management';
-                                  _expandedSidebarMenu = 'Employee Management';
-                                  _selectedAttendanceSection = 'Employee List';
-                                  _selectedHrSection = 'Employee List';
-                                });
-                              },
-                            ),
-                          ],
+                          ]),
                           _buildMenuItem(
                             'Attendance',
                             Icons.access_time,
                             'Attendance',
                           ),
-                          if (_expandedSidebarMenu == 'Attendance') ...[
+                          _buildSubMenuGroup('Attendance', [
                             _buildSubMenuItem(
                               'Daily Attendance',
                               _selectedAttendanceSection == 'Daily Attendance',
@@ -4801,13 +5265,13 @@ class _HomePageState extends State<HomePage> {
                                 _loadAdminAttendanceReport();
                               },
                             ),
-                          ],
+                          ]),
                           _buildMenuItem(
                             'Employee Location',
                             Icons.location_on,
                             'Employee Location',
                           ),
-                          if (_expandedSidebarMenu == 'Employee Location') ...[
+                          _buildSubMenuGroup('Employee Location', [
                             _buildSubMenuItem(
                               'Add Location',
                               _selectedAttendanceSection == 'Add Location',
@@ -4830,13 +5294,13 @@ class _HomePageState extends State<HomePage> {
                                 });
                               },
                             ),
-                          ],
+                          ]),
                           _buildMenuItem(
                             'Employee Payroll',
                             Icons.account_balance_wallet,
                             'Employee Payroll',
                           ),
-                          if (_expandedSidebarMenu == 'Employee Payroll') ...[
+                          _buildSubMenuGroup('Employee Payroll', [
                             _buildSubMenuItem(
                               'Reimbursement',
                               _selectedHrPayrollSection == 'Reimbursement',
@@ -4853,7 +5317,7 @@ class _HomePageState extends State<HomePage> {
                               () =>
                                   _selectHrPayrollSection('Bonus & Incentives'),
                             ),
-                          ],
+                          ]),
                           _buildMenuItem(
                             'Leaves',
                             Icons.calendar_today,
@@ -4864,21 +5328,21 @@ class _HomePageState extends State<HomePage> {
                             Icons.notifications_active_outlined,
                             'Notifications',
                           ),
-                          if (_expandedSidebarMenu == 'Notifications') ...[
+                          _buildSubMenuGroup('Notifications', [
                             _buildSubMenuItem(
                               'Notifications',
                               _selectedMenu == 'Notifications',
                               () => _selectMenu('Notifications'),
                             ),
-                          ],
+                          ]),
                           _buildMenuItem('Helpdesk', Icons.help, 'Helpdesk'),
-                          if (_expandedSidebarMenu == 'Helpdesk') ...[
+                          _buildSubMenuGroup('Helpdesk', [
                             _buildSubMenuItem(
                               'Help Desk',
                               _selectedMenu == 'Helpdesk',
                               () => _selectMenu('Helpdesk'),
                             ),
-                          ],
+                          ]),
                         ],
 
                         // ================= ADMIN PANEL =================
@@ -4890,8 +5354,7 @@ class _HomePageState extends State<HomePage> {
                             'Employee Management',
                           ),
 
-                          if (_expandedSidebarMenu ==
-                              'Employee Management') ...[
+                          _buildSubMenuGroup('Employee Management', [
                             _buildSubMenuItem(
                               'Add Employee',
                               _selectedAttendanceSection == 'Add Employee',
@@ -4925,18 +5388,7 @@ class _HomePageState extends State<HomePage> {
                                 });
                               },
                             ),
-                            _buildSubMenuItem(
-                              'Employee List',
-                              _selectedAttendanceSection == 'Employee List',
-                              () {
-                                setState(() {
-                                  _selectedMenu = 'Employee Management';
-                                  _expandedSidebarMenu = 'Employee Management';
-                                  _selectedAttendanceSection = 'Employee List';
-                                });
-                              },
-                            ),
-                          ],
+                          ]),
 
                           // SMART LOCATION MANAGEMENT
                           _buildMenuItem(
@@ -4945,8 +5397,7 @@ class _HomePageState extends State<HomePage> {
                             'Smart Location Management',
                           ),
 
-                          if (_expandedSidebarMenu ==
-                              'Smart Location Management') ...[
+                          _buildSubMenuGroup('Smart Location Management', [
                             _buildSubMenuItem(
                               'Add Location',
                               _selectedAttendanceSection == 'Add Location',
@@ -4967,7 +5418,7 @@ class _HomePageState extends State<HomePage> {
                                 });
                               },
                             ),
-                          ],
+                          ]),
 
                           // ATTENDANCE
                           _buildMenuItem(
@@ -4976,7 +5427,7 @@ class _HomePageState extends State<HomePage> {
                             'Attendance',
                           ),
 
-                          if (_expandedSidebarMenu == 'Attendance') ...[
+                          _buildSubMenuGroup('Attendance', [
                             _buildSubMenuItem(
                               'Daily Attendance',
                               _selectedAttendanceSection == 'Daily Attendance',
@@ -5003,7 +5454,7 @@ class _HomePageState extends State<HomePage> {
                                 _loadAdminAttendanceReport();
                               },
                             ),
-                          ],
+                          ]),
 
                           // WORK MONITORING
                           _buildMenuItem(
@@ -5011,7 +5462,7 @@ class _HomePageState extends State<HomePage> {
                             Icons.work,
                             'Work Monitoring',
                           ),
-                          if (_expandedSidebarMenu == 'Work Monitoring') ...[
+                          _buildSubMenuGroup('Work Monitoring', [
                             _buildSubMenuItem(
                               'Work Monitoring',
                               _selectedMenu == 'Work Monitoring',
@@ -5024,16 +5475,16 @@ class _HomePageState extends State<HomePage> {
                                 _loadAdminTasks();
                               },
                             ),
-                          ],
+                          ]),
 
                           _buildMenuItem('Helpdesk', Icons.help, 'Helpdesk'),
-                          if (_expandedSidebarMenu == 'Helpdesk') ...[
+                          _buildSubMenuGroup('Helpdesk', [
                             _buildSubMenuItem(
                               'Help Desk',
                               _selectedMenu == 'Helpdesk',
                               () => _selectMenu('Helpdesk'),
                             ),
-                          ],
+                          ]),
                         ],
                       ],
                     ),
@@ -5374,7 +5825,7 @@ class _HomePageState extends State<HomePage> {
                                 if (_lastAttendancePhotoBiometric != null) ...[
                                   const SizedBox(height: 18),
                                   _buildPhotoBiometricPreview(
-                                    'Latest captured biometric',
+                                    'Latest captured $_attendanceCaptureLabel',
                                     _lastAttendancePhotoBiometric!,
                                     message: _lastAttendanceBiometricMessage,
                                   ),
@@ -5729,9 +6180,115 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ],
               ),
+              if (checkedIn || checkedOut) ...[
+                const SizedBox(height: 16),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final checkInLocation = _buildTodayLocationValue(
+                      label: 'Check-in location',
+                      distance: attendance?['check_in_distance_meters'],
+                      accuracy: attendance?['check_in_accuracy'],
+                      mapUrl: attendance?['check_in_map_url']?.toString() ?? '',
+                      color: const Color(0xFF1ABE8E),
+                    );
+                    final checkOutLocation = _buildTodayLocationValue(
+                      label: 'Check-out location',
+                      distance: attendance?['check_out_distance_meters'],
+                      accuracy: attendance?['check_out_accuracy'],
+                      mapUrl:
+                          attendance?['check_out_map_url']?.toString() ?? '',
+                      color: Colors.red,
+                    );
+                    if (constraints.maxWidth < 620) {
+                      return Column(
+                        children: [
+                          checkInLocation,
+                          const SizedBox(height: 12),
+                          checkOutLocation,
+                        ],
+                      );
+                    }
+                    return Row(
+                      children: [
+                        Expanded(child: checkInLocation),
+                        const SizedBox(width: 14),
+                        Expanded(child: checkOutLocation),
+                      ],
+                    );
+                  },
+                ),
+              ],
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildTodayLocationValue({
+    required String label,
+    required dynamic distance,
+    required dynamic accuracy,
+    required String mapUrl,
+    required Color color,
+  }) {
+    final hasDistance = distance is num || double.tryParse('$distance') != null;
+    final distanceText = hasDistance ? _distanceLabel(distance) : '-';
+    final accuracyValue = accuracy is num
+        ? accuracy.toDouble()
+        : double.tryParse('$accuracy');
+    final accuracyText = accuracyValue == null
+        ? 'Accuracy -'
+        : 'Accuracy ${accuracyValue.toStringAsFixed(0)}m';
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.14)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.location_on_outlined, color: color, size: 22),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: Colors.grey[600],
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  distanceText,
+                  style: const TextStyle(
+                    color: Color(0xFF1F2E5A),
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  accuracyText,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: Colors.grey[700], fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            tooltip: 'Open map',
+            onPressed: mapUrl.isEmpty ? null : () => openExternalLink(mapUrl),
+            icon: const Icon(Icons.map_outlined),
+            color: color,
+          ),
+        ],
       ),
     );
   }
@@ -12904,24 +13461,54 @@ class _HomePageState extends State<HomePage> {
   Widget _buildSmartLocationManagementView() {
     final isAdd = _selectedAttendanceSection == 'Add Location';
     final selectedEmployee = _selectedLocationEmployee();
+    final employeesLoaded = _adminEmployeeMaps().isNotEmpty;
 
     return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(28, 26, 28, 0),
+      padding: const EdgeInsets.fromLTRB(24, 22, 24, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _buildLocationHero(isAdd: isAdd),
-          const SizedBox(height: 22),
+          const SizedBox(height: 16),
+          if (_isDashboardLoading) ...[
+            const LinearProgressIndicator(minHeight: 3),
+            const SizedBox(height: 12),
+            _buildLocationStatusBanner(
+              icon: Icons.sync,
+              title: 'Loading employees',
+              message:
+                  'Employee records are being loaded for location assignment.',
+            ),
+            const SizedBox(height: 12),
+          ] else if (_dashboardError != null && !employeesLoaded) ...[
+            _buildLocationStatusBanner(
+              icon: Icons.error_outline,
+              title: 'Employee data unavailable',
+              message: _dashboardError!,
+              actionLabel: 'Retry',
+              onAction: loadDashboardData,
+              isError: true,
+            ),
+            const SizedBox(height: 12),
+          ] else if (!employeesLoaded) ...[
+            _buildLocationStatusBanner(
+              icon: Icons.people_outline,
+              title: 'No employees loaded',
+              message: 'Refresh employee data before assigning a location.',
+              actionLabel: 'Refresh',
+              onAction: loadDashboardData,
+            ),
+            const SizedBox(height: 12),
+          ],
           LayoutBuilder(
             builder: (context, constraints) {
-              final wide = constraints.maxWidth >= 1120;
               final employeeCard = _buildLocationEmployeeCard(
                 isAdd: isAdd,
                 selectedEmployee: selectedEmployee,
               );
               final detailsCard = _buildLocationDetailsCard(isAdd: isAdd);
               final previewCard = _buildLocationPreviewCard();
-              if (!wide) {
+              if (constraints.maxWidth < 760) {
                 return Column(
                   children: [
                     employeeCard,
@@ -12932,22 +13519,36 @@ class _HomePageState extends State<HomePage> {
                   ],
                 );
               }
+
+              if (constraints.maxWidth < 1180) {
+                return Column(
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(child: employeeCard),
+                        const SizedBox(width: 12),
+                        Expanded(child: detailsCard),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    previewCard,
+                  ],
+                );
+              }
+
               return Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(flex: 10, child: employeeCard),
-                  const SizedBox(width: 8),
+                  Expanded(flex: 9, child: employeeCard),
+                  const SizedBox(width: 12),
                   Expanded(flex: 11, child: detailsCard),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 12),
                   Expanded(flex: 10, child: previewCard),
                 ],
               );
             },
           ),
-          if (!_locationAttendanceEnabled) ...[
-            const SizedBox(height: 14),
-            _buildLocationDisabledCard(fullWidth: true),
-          ],
           if (!isAdd) ...[
             const SizedBox(height: 16),
             _buildLocationAssignmentsTable(),
@@ -12999,6 +13600,71 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  Widget _buildLocationStatusBanner({
+    required IconData icon,
+    required String title,
+    required String message,
+    String? actionLabel,
+    VoidCallback? onAction,
+    bool isError = false,
+  }) {
+    final color = isError ? Colors.redAccent : _brandBlue;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.26)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 22),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    color: color,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  message,
+                  style: const TextStyle(
+                    color: _mutedText,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (actionLabel != null && onAction != null) ...[
+            const SizedBox(width: 10),
+            OutlinedButton(
+              onPressed: onAction,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: color,
+                side: BorderSide(color: color),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(6),
+                ),
+              ),
+              child: Text(actionLabel),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   Widget _buildLocationEmployeeCard({
     required bool isAdd,
     required Map<String, dynamic>? selectedEmployee,
@@ -13007,24 +13673,26 @@ class _HomePageState extends State<HomePage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildSimpleFieldLabel('Employee', requiredMark: true),
-          const SizedBox(height: 8),
+          _buildLocationSectionTitle(
+            icon: Icons.badge_outlined,
+            title: 'Employee Details',
+          ),
+          const SizedBox(height: 12),
+          _buildSimpleFieldLabel('Employee Search', requiredMark: true),
+          const SizedBox(height: 6),
           _buildLocationEmployeeSearch(selectedEmployee),
-          const SizedBox(height: 22),
-          if (!isAdd) ...[
-            _buildSimpleFieldLabel('Start Date'),
-            const SizedBox(height: 8),
-            _buildLocationEffectiveDateButton(
-              label: 'Start Date',
-              value: _locationEffectiveFrom,
-              emptyLabel: 'Immediate',
-              onPick: (date) => setState(() => _locationEffectiveFrom = date),
-              onClear: () => setState(() => _locationEffectiveFrom = null),
-            ),
-            const SizedBox(height: 18),
-          ],
+          const SizedBox(height: 12),
+          selectedEmployee == null
+              ? _buildLocationStatusBanner(
+                  icon: Icons.person_search_outlined,
+                  title: 'Select employee',
+                  message:
+                      'Search by employee name, username, or employee ID to load assignment details.',
+                )
+              : _buildSelectedLocationEmployeeSummary(selectedEmployee),
+          const SizedBox(height: 12),
           _buildSimpleFieldLabel('End Date (Optional)'),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           _buildLocationEffectiveDateButton(
             label: 'End Date',
             value: _locationEffectiveTo,
@@ -13037,47 +13705,150 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  Widget _buildSelectedLocationEmployeeSummary(Map<String, dynamic> employee) {
+    final location = employee['assigned_location'] as Map<String, dynamic>?;
+    final title = _employeeDisplayName(employee);
+    final department =
+        employee['department']?.toString().trim().isNotEmpty == true
+        ? employee['department'].toString()
+        : 'Department not set';
+    final designation =
+        employee['designation']?.toString().trim().isNotEmpty == true
+        ? employee['designation'].toString()
+        : 'Designation not set';
+    final locationLabel = location == null
+        ? 'No location assigned'
+        : '${location['address']?.toString() ?? 'Saved location'} - ${location['radius_meters'] ?? 100}m';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFE4EAF3)),
+      ),
+      child: Row(
+        children: [
+          _buildEmployeeAvatar(_employeeInitials(employee), size: 38),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _inkBlue,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  '$department - $designation',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _mutedText,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  locationLabel,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _mutedText,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    height: 1.25,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            tooltip: 'Clear selected employee',
+            onPressed: () => _selectLocationEmployee(null),
+            icon: const Icon(Icons.close, size: 18),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildLocationDetailsCard({required bool isAdd}) {
     return _buildSimpleLocationCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          _buildLocationSectionTitle(
+            icon: Icons.edit_location_alt_outlined,
+            title: 'Location Details',
+          ),
+          const SizedBox(height: 12),
           _buildSimpleFieldLabel('Location Name', requiredMark: true),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           _buildLocationTextField(
             controller: _locationNameCtrl,
             label: '',
             hint: 'Enter location name',
             icon: Icons.business_outlined,
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 12),
           _buildSimpleFieldLabel('Address', requiredMark: true),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           _buildLocationTextField(
             controller: _locationAddressCtrl,
             label: '',
             hint: 'Enter full address',
             icon: Icons.location_on_outlined,
             minLines: 3,
-            maxLines: 3,
+            maxLines: 5,
+            onChanged: (value) {
+              setState(() {
+                _locationAddressPreview = value.trim().isEmpty
+                    ? 'Select address'
+                    : value.trim();
+              });
+            },
           ),
-          const SizedBox(height: 18),
-          _buildSimpleFieldLabel('Location Attendance'),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
+          _buildSimpleFieldLabel('Latitude/Longitude', requiredMark: true),
+          const SizedBox(height: 6),
+          _buildLocationTextField(
+            controller: _locationCoordinatesCtrl,
+            label: '',
+            hint: '13.05580947189991,77.54149038010287',
+            icon: Icons.my_location_outlined,
+            keyboardType: TextInputType.text,
+          ),
+          const SizedBox(height: 12),
+          _buildSimpleFieldLabel('Attendance Option'),
+          const SizedBox(height: 6),
           _buildLocationAttendanceToggle(),
-          if (_locationAttendanceEnabled) ...[
-            const SizedBox(height: 18),
-            _buildLocationRadiusControl(),
-            const SizedBox(height: 14),
-            _buildLocationTextField(
-              controller: _locationMapLinkCtrl,
-              label: '',
-              hint: 'Map link or landmark (optional)',
-              icon: Icons.map_outlined,
-              minLines: 1,
-              maxLines: 2,
-            ),
-          ],
+          const SizedBox(height: 12),
+          _buildLocationFaceVerificationToggle(),
+          const SizedBox(height: 12),
+          _buildSimpleFieldLabel('GPS Radius'),
+          const SizedBox(height: 6),
+          _buildLocationRadiusControl(),
+          const SizedBox(height: 12),
+          _buildSimpleFieldLabel('Landmark'),
+          const SizedBox(height: 6),
+          _buildLocationTextField(
+            controller: _locationMapLinkCtrl,
+            label: '',
+            hint: 'Map link or nearby landmark',
+            icon: Icons.map_outlined,
+            minLines: 1,
+            maxLines: 1,
+          ),
         ],
       ),
     );
@@ -13086,7 +13857,8 @@ class _HomePageState extends State<HomePage> {
   Widget _buildSimpleLocationCard({required Widget child}) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(18),
+      constraints: const BoxConstraints(minHeight: 430),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(8),
@@ -13100,6 +13872,37 @@ class _HomePageState extends State<HomePage> {
         ],
       ),
       child: child,
+    );
+  }
+
+  Widget _buildLocationSectionTitle({
+    required IconData icon,
+    required String title,
+  }) {
+    return Row(
+      children: [
+        Container(
+          width: 30,
+          height: 30,
+          decoration: BoxDecoration(
+            color: _brandBlue.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Icon(icon, color: _brandBlue, size: 17),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            title,
+            style: const TextStyle(
+              color: _inkBlue,
+              fontSize: 14,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0,
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -13125,7 +13928,14 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildLocationEmployeeSearch(Map<String, dynamic>? selectedEmployee) {
     final query = _locationEmployeeSearchCtrl.text.trim().toLowerCase();
-    final matches = query.length < 2
+    final selectedLabel = selectedEmployee == null
+        ? ''
+        : _employeeDisplayName(selectedEmployee).trim();
+    final showMatches =
+        query.length >= 2 &&
+        (selectedEmployee == null ||
+            _locationEmployeeSearchCtrl.text.trim() != selectedLabel);
+    final matches = !showMatches
         ? <Map<String, dynamic>>[]
         : _adminEmployeeMaps()
               .where((employee) {
@@ -13150,17 +13960,14 @@ class _HomePageState extends State<HomePage> {
           hint: 'Search employee by name or ID...',
           icon: Icons.person_search_outlined,
           onChanged: (value) {
-            final selectedLabel = selectedEmployee == null
-                ? ''
-                : _employeeDisplayName(selectedEmployee);
             setState(() {
-              if (value.trim() != selectedLabel) {
+              if (value.trim() != selectedLabel.trim()) {
                 _selectedLocationEmployeeId = null;
               }
             });
           },
         ),
-        if (query.length >= 2) ...[
+        if (showMatches) ...[
           const SizedBox(height: 8),
           Container(
             constraints: const BoxConstraints(maxHeight: 220),
@@ -13455,6 +14262,24 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  Widget _buildLocationFaceVerificationToggle() {
+    return _buildLocationToggleTile(
+      selected: _locationFaceVerificationEnabled,
+      title: 'Enable Face Verification for This Location',
+      subtitle: _locationFaceVerificationEnabled
+          ? 'Biometric match required when global setting is on'
+          : 'Standard photo capture when global setting is on',
+      icon: _locationFaceVerificationEnabled
+          ? Icons.face_retouching_natural
+          : Icons.photo_camera_outlined,
+      onTap: () {
+        setState(() {
+          _locationFaceVerificationEnabled = !_locationFaceVerificationEnabled;
+        });
+      },
+    );
+  }
+
   Widget _buildLocationToggleTile({
     required bool selected,
     required String title,
@@ -13666,9 +14491,7 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
           const SizedBox(height: 12),
-          _locationAttendanceEnabled
-              ? _buildLiveMapPreview()
-              : _buildLocationDisabledCard(),
+          _buildLiveMapPreview(),
         ],
       ),
     );
@@ -13676,191 +14499,298 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildLiveMapPreview() {
     final radius = int.tryParse(_locationRadiusCtrl.text.trim()) ?? 100;
-    final address = _locationAddressCtrl.text.trim().isEmpty
-        ? 'Select address'
+    final coordinates = _parseLocationCoordinates(
+      _locationCoordinatesCtrl.text,
+    );
+    final address = _locationAddressPreview.trim().isNotEmpty
+        ? _locationAddressPreview
+        : _locationAddressCtrl.text.trim().isEmpty
+        ? 'Select a map pin'
         : _locationAddressCtrl.text.trim();
-    return Container(
-      key: const ValueKey('enabled-map-preview'),
-      height: 282,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: const Color(0xFFE4EAF3)),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(6),
-        child: Stack(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
           children: [
-            Positioned.fill(
-              child: Container(
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      Color(0xFFE0F2FE),
-                      Color(0xFFDCFCE7),
-                      Color(0xFFF8FAFC),
-                    ],
+            Expanded(
+              child: TextField(
+                controller: _locationSearchCtrl,
+                onSubmitted: (_) => _searchLocationOnMap(),
+                decoration: InputDecoration(
+                  hintText: 'Search office address or landmark',
+                  prefixIcon: const Icon(Icons.search, size: 18),
+                  suffixIcon: _isLocationSearching
+                      ? const Padding(
+                          padding: EdgeInsets.all(12),
+                          child: SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        )
+                      : IconButton(
+                          tooltip: 'Search map',
+                          onPressed: _searchLocationOnMap,
+                          icon: const Icon(Icons.arrow_forward),
+                        ),
+                  isDense: true,
+                  filled: true,
+                  fillColor: Colors.white,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(6),
+                    borderSide: const BorderSide(color: Color(0xFFDCE4EF)),
                   ),
                 ),
               ),
             ),
-            Positioned.fill(child: CustomPaint(painter: _LocationMapPainter())),
-            Center(
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 220),
-                width: (radius / 1000 * 160).clamp(84, 160),
-                height: (radius / 1000 * 160).clamp(84, 160),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: _brandBlue.withValues(alpha: 0.14),
-                  border: Border.all(
-                    color: _brandBlue.withValues(alpha: 0.45),
-                    width: 1.4,
-                  ),
-                ),
-              ),
-            ),
-            Center(
-              child: Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: _brandBlue,
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.location_on, color: Colors.white),
-              ),
-            ),
-            Positioned(
-              right: 12,
-              top: 118,
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(4),
-                  border: Border.all(color: const Color(0xFFDCE4EF)),
-                ),
-                child: const Column(
-                  children: [
-                    SizedBox(
-                      width: 34,
-                      height: 34,
-                      child: Icon(Icons.add, color: _inkBlue, size: 18),
-                    ),
-                    Divider(height: 1),
-                    SizedBox(
-                      width: 34,
-                      height: 34,
-                      child: Icon(Icons.remove, color: _inkBlue, size: 18),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  border: Border(
-                    top: BorderSide(color: const Color(0xFFE4EAF3)),
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.location_on_outlined, color: _brandBlue),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        address,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: _inkBlue,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    OutlinedButton(
-                      onPressed: () {},
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: _brandBlue,
-                        side: const BorderSide(color: _brandBlue),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(5),
-                        ),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 10,
-                        ),
-                      ),
-                      child: const Text(
-                        'Pick on Map',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+            const SizedBox(width: 8),
+            IconButton.filledTonal(
+              tooltip: 'Use current location',
+              onPressed: _isLocationLocating
+                  ? null
+                  : _useCurrentLocationForOffice,
+              icon: _isLocationLocating
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.my_location),
             ),
           ],
         ),
-      ),
-    );
-  }
+        const SizedBox(height: 10),
+        Container(
+          key: const ValueKey('enabled-map-preview'),
+          height: 330,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: const Color(0xFFE4EAF3)),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final size = Size(constraints.maxWidth, constraints.maxHeight);
+                final center = _latLonToWorldPixel(
+                  _locationMapLatitude,
+                  _locationMapLongitude,
+                  _locationMapZoom,
+                );
+                final topLeft = Offset(
+                  center.dx - size.width / 2,
+                  center.dy - size.height / 2,
+                );
+                final tileMinX = (topLeft.dx / 256).floor();
+                final tileMaxX = ((topLeft.dx + size.width) / 256).ceil();
+                final tileMinY = (topLeft.dy / 256).floor();
+                final tileMaxY = ((topLeft.dy + size.height) / 256).ceil();
+                final tileCount = math.pow(2, _locationMapZoom).toInt();
+                final metersPerPixel =
+                    156543.03392 *
+                    math.cos(_locationMapLatitude * math.pi / 180) /
+                    math.pow(2, _locationMapZoom);
+                final radiusPixels = metersPerPixel <= 0
+                    ? 120.0
+                    : (radius / metersPerPixel).clamp(24.0, 520.0).toDouble();
+                final tiles = <Widget>[];
+                for (var x = tileMinX; x <= tileMaxX; x++) {
+                  for (var y = tileMinY; y <= tileMaxY; y++) {
+                    if (y < 0 || y >= tileCount) continue;
+                    final wrappedX = ((x % tileCount) + tileCount) % tileCount;
+                    tiles.add(
+                      Positioned(
+                        left: x * 256.0 - topLeft.dx,
+                        top: y * 256.0 - topLeft.dy,
+                        width: 256,
+                        height: 256,
+                        child: Image.network(
+                          'https://tile.openstreetmap.org/$_locationMapZoom/$wrappedX/$y.png',
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) =>
+                              Container(
+                                color: const Color(0xFFE2E8F0),
+                                child: const Icon(
+                                  Icons.map_outlined,
+                                  color: _mutedText,
+                                ),
+                              ),
+                        ),
+                      ),
+                    );
+                  }
+                }
 
-  Widget _buildLocationDisabledCard({bool fullWidth = false}) {
-    return Container(
-      key: const ValueKey('location-disabled-card'),
-      width: fullWidth ? double.infinity : null,
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8FBFF),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: _brandBlue.withValues(alpha: 0.35)),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.info_outline, color: _brandBlue, size: 22),
-          const SizedBox(width: 12),
-          const Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Location Restriction Disabled',
-                  style: TextStyle(
-                    color: _brandBlue,
-                    fontWeight: FontWeight.w900,
-                    fontSize: 14,
+                return GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTapUp: (details) {
+                    final picked = _locationFromMapLocalPosition(
+                      size,
+                      details.localPosition,
+                    );
+                    _setLocationPin(picked.latitude, picked.longitude);
+                  },
+                  onPanUpdate: (details) {
+                    final picked = _locationFromMapLocalPosition(
+                      size,
+                      details.localPosition,
+                    );
+                    _setLocationPin(
+                      picked.latitude,
+                      picked.longitude,
+                      reverseGeocode: false,
+                    );
+                  },
+                  onPanEnd: (_) => _scheduleLocationReverseGeocode(),
+                  child: Stack(
+                    children: [
+                      Positioned.fill(
+                        child: Container(color: const Color(0xFFEFF6FF)),
+                      ),
+                      ...tiles,
+                      Center(
+                        child: IgnorePointer(
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 160),
+                            width: radiusPixels * 2,
+                            height: radiusPixels * 2,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: _brandBlue.withValues(alpha: 0.14),
+                              border: Border.all(
+                                color: _brandBlue.withValues(alpha: 0.5),
+                                width: 1.5,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      Center(
+                        child: IgnorePointer(
+                          child: Transform.translate(
+                            offset: const Offset(0, -17),
+                            child: const Icon(
+                              Icons.location_on,
+                              color: Color(0xFFE11D48),
+                              size: 44,
+                              shadows: [
+                                Shadow(color: Colors.white, blurRadius: 8),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        right: 10,
+                        top: 10,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: const Color(0xFFDCE4EF)),
+                            boxShadow: _softShadow(0.06),
+                          ),
+                          child: Column(
+                            children: [
+                              IconButton(
+                                tooltip: 'Zoom in',
+                                onPressed: () => _changeLocationMapZoom(1),
+                                icon: const Icon(Icons.add, size: 18),
+                              ),
+                              const Divider(height: 1),
+                              IconButton(
+                                tooltip: 'Zoom out',
+                                onPressed: () => _changeLocationMapZoom(-1),
+                                icon: const Icon(Icons.remove, size: 18),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
+                          decoration: const BoxDecoration(
+                            color: Colors.white,
+                            border: Border(
+                              top: BorderSide(color: Color(0xFFE4EAF3)),
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                coordinates == null
+                                    ? Icons.location_off_outlined
+                                    : Icons.location_on_outlined,
+                                color: coordinates == null
+                                    ? Colors.redAccent
+                                    : _brandBlue,
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      address,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: _inkBlue,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      coordinates == null
+                                          ? 'Tap map, search, use current location, or enter coordinates.'
+                                          : _locationCoordinatesCtrl.text
+                                                .trim(),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: _mutedText,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-                SizedBox(height: 4),
-                Text(
-                  'Attendance allowed without GPS radius validation.',
-                  style: TextStyle(
-                    color: _brandBlue,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 12,
-                    height: 1.3,
-                  ),
-                ),
-              ],
+                );
+              },
             ),
           ),
-        ],
-      ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          coordinates == null
+              ? 'Valid latitude and longitude are required before saving.'
+              : 'Pin selected. Radius: ${radius.clamp(1, 100000)}m.',
+          style: TextStyle(
+            color: coordinates == null ? Colors.redAccent : _mutedText,
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
     );
   }
 
@@ -13922,12 +14852,19 @@ class _HomePageState extends State<HomePage> {
       _locationEmployeeSearchCtrl.clear();
       _locationNameCtrl.text = 'Work Location';
       _locationAddressCtrl.clear();
+      _locationCoordinatesCtrl.clear();
       _locationMapLinkCtrl.clear();
+      _locationSearchCtrl.clear();
       _locationRadiusCtrl.text = '100';
       _locationAttendanceEnabled = true;
+      _locationFaceVerificationEnabled = true;
       _locationEffectiveFrom = null;
       _locationEffectiveTo = null;
       _selectedLocationDate = null;
+      _locationMapLatitude = 13.058889689752338;
+      _locationMapLongitude = 77.54593290059762;
+      _locationMapZoom = 16;
+      _locationAddressPreview = 'Select address';
     });
   }
 
@@ -14564,7 +15501,9 @@ class _HomePageState extends State<HomePage> {
   }
 
   String _distanceLabel(dynamic value) {
-    final distance = (value as num?)?.toDouble();
+    final distance = value is num
+        ? value.toDouble()
+        : double.tryParse('$value');
     if (distance == null) return '-';
     return '${distance.toStringAsFixed(1)}m';
   }
@@ -16338,6 +17277,8 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ),
                 const SizedBox(height: 24),
+                _buildFaceRecognitionToggleRow(),
+                const SizedBox(height: 16),
                 _buildToggleRow('Email Notifications', true),
                 const SizedBox(height: 16),
                 _buildToggleRow('SMS Alerts', false),
@@ -16388,6 +17329,32 @@ class _HomePageState extends State<HomePage> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildFaceRecognitionToggleRow() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Expanded(
+          child: Text(
+            'Require Face Verification',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+        ),
+        if (_isFaceSettingsSaving)
+          const SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          )
+        else
+          Switch(
+            value: _faceRecognitionEnabled,
+            onChanged: _saveFaceRecognitionEnabled,
+            activeThumbColor: const Color(0xFF1ABE8E),
+          ),
+      ],
     );
   }
 
@@ -16627,6 +17594,42 @@ class _HomePageState extends State<HomePage> {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSubMenuGroup(String menuKey, List<Widget> children) {
+    final isExpanded = !_isSidebarCollapsed && _expandedSidebarMenu == menuKey;
+
+    // Flutter web can briefly paint RenderFlex overflow stripes when submenu
+    // rows are inserted/removed directly in the sidebar Column. Keeping the
+    // submenu subtree mounted and clipping an animated height factor prevents
+    // those transient flashes while dashboard data and role state rebuild.
+    return RepaintBoundary(
+      child: ClipRect(
+        child: TweenAnimationBuilder<double>(
+          tween: Tween<double>(end: isExpanded ? 1 : 0),
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          builder: (context, heightFactor, child) {
+            final isVisible = heightFactor > 0.001;
+            return IgnorePointer(
+              ignoring: !isExpanded,
+              child: TickerMode(
+                enabled: isVisible,
+                child: Opacity(
+                  opacity: isVisible ? 1 : 0,
+                  child: Align(
+                    alignment: Alignment.topCenter,
+                    heightFactor: heightFactor,
+                    child: child,
+                  ),
+                ),
+              ),
+            );
+          },
+          child: Column(mainAxisSize: MainAxisSize.min, children: children),
         ),
       ),
     );

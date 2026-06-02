@@ -13,7 +13,49 @@ from .models import (
 )
 
 
+class CompactDecimalField(serializers.DecimalField):
+    def to_representation(self, value):
+        representation = super().to_representation(value)
+        if representation is None:
+            return representation
+        return representation.rstrip('0').rstrip('.') if '.' in representation else representation
+
+
 class AssignedLocationSerializer(serializers.ModelSerializer):
+    latitude = CompactDecimalField(max_digits=18, decimal_places=15)
+    longitude = CompactDecimalField(max_digits=18, decimal_places=15)
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        latitude = attrs.get('latitude', getattr(self.instance, 'latitude', None))
+        longitude = attrs.get('longitude', getattr(self.instance, 'longitude', None))
+        is_active = attrs.get('is_active', getattr(self.instance, 'is_active', True))
+        if latitude is not None and longitude is not None:
+            if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
+                raise serializers.ValidationError(
+                    {
+                        'latitude': (
+                            'Latitude/Longitude must use latitude,longitude format '
+                            'with latitude between -90 and 90 and longitude between -180 and 180.'
+                        )
+                    }
+                )
+            if is_active and latitude == 0 and longitude == 0:
+                raise serializers.ValidationError(
+                    {
+                        'latitude': (
+                            'Select a valid map pin or enter valid latitude/longitude '
+                            'before enabling location attendance.'
+                        )
+                    }
+                )
+        radius = attrs.get('radius_meters', getattr(self.instance, 'radius_meters', None))
+        if radius is not None and radius <= 0:
+            raise serializers.ValidationError(
+                {'radius_meters': 'Radius must be greater than 0.'}
+            )
+        return attrs
+
     class Meta:
         model = AssignedLocation
         fields = [
@@ -22,16 +64,29 @@ class AssignedLocationSerializer(serializers.ModelSerializer):
             'address',
             'map_url',
             'coordinates_resolved',
+            'latitude',
+            'longitude',
             'radius_meters',
             'effective_from',
             'effective_to',
             'is_active',
+            'face_verification_enabled',
             'updated_at',
         ]
         read_only_fields = ['id', 'updated_at']
 
 
 class AttendanceSerializer(serializers.ModelSerializer):
+    latitude = CompactDecimalField(max_digits=18, decimal_places=15)
+    longitude = CompactDecimalField(max_digits=18, decimal_places=15)
+    position_timestamp = serializers.DateTimeField(write_only=True, required=False)
+    location_captured_at = serializers.DateTimeField(write_only=True, required=False)
+
+    def create(self, validated_data):
+        validated_data.pop('position_timestamp', None)
+        validated_data.pop('location_captured_at', None)
+        return super().create(validated_data)
+
     class Meta:
         model = Attendance
         fields = [
@@ -44,6 +99,8 @@ class AttendanceSerializer(serializers.ModelSerializer):
             'latitude',
             'longitude',
             'accuracy',
+            'position_timestamp',
+            'location_captured_at',
             'photo_biometric',
             'timestamp',
         ]

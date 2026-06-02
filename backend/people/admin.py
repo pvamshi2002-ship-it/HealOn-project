@@ -1,6 +1,7 @@
 import re
 import json
 import csv
+from decimal import Decimal
 from urllib.error import URLError
 from urllib.parse import parse_qs, quote_plus, unquote, urlparse
 from urllib.request import Request, urlopen
@@ -26,6 +27,7 @@ except ImportError:
 from .models import (
     AssignedLocation,
     Attendance,
+    AttendanceSettings,
     AttendanceRegularization,
     EmployeeTask,
     HelpdeskTicket,
@@ -35,6 +37,11 @@ from .models import (
     ReimbursementRequest,
     SalaryRecord,
     UserProfile,
+)
+from .location_utils import (
+    extract_coordinates_from_map_url,
+    geocode_location_text,
+    parse_coordinate_pair,
 )
 from .password_rules import validate_password_rules
 
@@ -81,6 +88,11 @@ def status_badge(value, label=None):
         border,
         text,
     )
+
+
+def compact_decimal(value):
+    decimal_value = Decimal(str(value or 0))
+    return format(decimal_value.normalize(), 'f')
 
 
 def biometric_image_preview(value, width=120, height=90):
@@ -289,123 +301,17 @@ class HealOnUserChangeForm(forms.ModelForm):
         js = ('people/admin_employee_form.js',)
 
 
-def extract_coordinates_from_map_url(value):
-    text = (value or '').strip()
-    if not text:
-        return None
-
-    decoded = unquote(resolve_map_url(text))
-    patterns = [
-        r'@(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)',
-        r'[?&](?:q|query|ll)=(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)',
-        r'!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)',
-        r'^(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)$',
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, decoded)
-        if match:
-            return match.group(1), match.group(2)
-
-    parsed = urlparse(decoded)
-    query = parse_qs(parsed.query)
-    for key in ('q', 'query', 'll'):
-        raw = query.get(key, [''])[0]
-        match = re.search(r'(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)', raw)
-        if match:
-            return match.group(1), match.group(2)
-
-    return None
-
-
-def geocode_location_text(value):
-    text = (value or '').strip()
-    if not text:
-        return None
-
-    for candidate in location_lookup_candidates(text):
-        coordinates = geocode_single_location_text(candidate)
-        if coordinates:
-            return coordinates
-    return None
-
-
-def location_lookup_candidates(text):
-    normalized = re.sub(r'\bRd\b', 'Road', text, flags=re.IGNORECASE)
-    normalized = re.sub(
-        r'Kammagondahalli',
-        'Kammagondanahalli',
-        normalized,
-        flags=re.IGNORECASE,
-    )
-    candidates = []
-    for candidate in (text, normalized):
-        if candidate and candidate not in candidates:
-            candidates.append(candidate)
-
-    if re.fullmatch(r'\s*k\.?\s*g\.?\s*halli\s*', text, flags=re.IGNORECASE):
-        candidates.extend([
-            'Kammagondanahalli, Jalahalli West, Bengaluru, Karnataka 560015',
-            'Jalahalli West, Bengaluru, Karnataka 560015',
-        ])
-
-    parts = [part.strip() for part in normalized.split(',') if part.strip()]
-    for index in range(1, max(len(parts) - 1, 1)):
-        candidate = ', '.join(parts[index:])
-        if candidate and candidate not in candidates:
-            candidates.append(candidate)
-
-    return candidates
-
-
-def geocode_single_location_text(text):
-    url = f'https://nominatim.openstreetmap.org/search?q={quote_plus(text)}&format=json&limit=1'
-    try:
-        request = Request(
-            url,
-            headers={
-                'User-Agent': 'HealOnAdminLocation/1.0',
-                'Accept': 'application/json',
-            },
-        )
-        with urlopen(request, timeout=8) as response:
-            results = json.loads(response.read().decode('utf-8') or '[]')
-    except (ValueError, URLError, json.JSONDecodeError):
-        return None
-
-    if not results:
-        return None
-
-    result = results[0]
-    latitude = result.get('lat')
-    longitude = result.get('lon')
-    if latitude and longitude:
-        return latitude, longitude
-    return None
-
-
-def resolve_map_url(value):
-    text = (value or '').strip()
-    parsed = urlparse(text)
-    if parsed.netloc not in {'maps.app.goo.gl', 'goo.gl'}:
-        return text
-
-    try:
-        request = Request(
-            text,
-            headers={
-                'User-Agent': (
-                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-                    'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36'
-                )
-            },
-        )
-        with urlopen(request, timeout=8) as response:
-            return response.geturl()
-    except (ValueError, URLError):
-        return text
-
 
 class AssignedLocationAdminForm(forms.ModelForm):
+    face_verification_enabled = forms.BooleanField(
+        label='Enable Face Verification for This Location',
+        required=False,
+        initial=True,
+        help_text=(
+            'When global face verification is required, this controls whether '
+            'employees at this assigned location must match their registered photo.'
+        ),
+    )
     is_active = forms.TypedChoiceField(
         label='Location attendance',
         choices=((True, 'Enable Location'), (False, 'Disable Location')),
@@ -421,6 +327,21 @@ class AssignedLocationAdminForm(forms.ModelForm):
         required=False,
         help_text='Optional. Paste the exact Google Maps place link for more accurate check-in distance.',
         widget=forms.TextInput(attrs={'style': 'width: 520px; max-width: 100%;'}),
+    )
+    latitude_longitude = forms.CharField(
+        label='Latitude/Longitude',
+        required=False,
+        help_text=(
+            'Required when Location attendance is enabled. Search the map, drag '
+            'the pin, use current location, or enter coordinates as latitude,longitude.'
+        ),
+        widget=forms.TextInput(
+            attrs={
+                'class': 'healon-location-coordinate-input',
+                'placeholder': '13.05580947189991,77.54149038010287',
+                'style': 'width: 520px; max-width: 100%;',
+            },
+        ),
     )
 
     class Meta:
@@ -444,20 +365,86 @@ class AssignedLocationAdminForm(forms.ModelForm):
         if 'coordinates_resolved' in self.fields:
             self.fields['coordinates_resolved'].required = False
         self.fields['radius_meters'].help_text = (
-            'Mandatory when Location attendance is enabled.'
+            'Allowed GPS radius in meters. Must be greater than 0 when saved.'
         )
+        self.fields['radius_meters'].widget.attrs.update({'min': '1', 'step': '1'})
         if self.instance and self.instance.pk:
             self.fields['map_location'].initial = self.instance.map_url
+            if not (
+                self.instance.latitude == 0 and self.instance.longitude == 0
+            ):
+                self.fields['latitude_longitude'].initial = (
+                    f'{self.instance.latitude},{self.instance.longitude}'
+                )
+
+    def _field_value(self, field_name):
+        if not self.is_bound:
+            return self.initial.get(field_name)
+        return self.data.get(self.add_prefix(field_name))
+
+    def _is_empty_attached_inline(self):
+        if self.instance and self.instance.pk:
+            return False
+        return not any(
+            (self._field_value(field_name) or '').strip()
+            for field_name in (
+                'address',
+                'latitude_longitude',
+                'map_location',
+                'map_url',
+                'latitude',
+                'longitude',
+            )
+        )
+
+    def has_changed(self):
+        if self._is_empty_attached_inline():
+            return False
+        return super().has_changed()
 
     def clean(self):
         cleaned_data = super().clean()
+        if self._is_empty_attached_inline():
+            cleaned_data['address'] = cleaned_data.get('address') or ''
+            cleaned_data['latitude'] = 0
+            cleaned_data['longitude'] = 0
+            cleaned_data['coordinates_resolved'] = False
+            return cleaned_data
         address = (cleaned_data.get('address') or '').strip()
         map_location = (cleaned_data.get('map_location') or '').strip()
-        coordinates = extract_coordinates_from_map_url(map_location)
+        coordinate_text = (cleaned_data.get('latitude_longitude') or '').strip()
+        location_enabled = cleaned_data.get('is_active')
+        radius_meters = cleaned_data.get('radius_meters')
+        hidden_coordinate_text = '{},{}'.format(
+            cleaned_data.get('latitude') or '',
+            cleaned_data.get('longitude') or '',
+        )
+        coordinates = parse_coordinate_pair(coordinate_text) if coordinate_text else None
+        if coordinate_text and coordinates is None:
+            self.add_error(
+                'latitude_longitude',
+                'Enter coordinates as latitude,longitude with latitude between -90 and 90 and longitude between -180 and 180.',
+            )
+            return cleaned_data
         if not coordinates:
-            coordinates = extract_coordinates_from_map_url(address)
+            coordinates = parse_coordinate_pair(hidden_coordinate_text)
         if not coordinates:
-            coordinates = geocode_location_text(address)
+            map_coordinates = extract_coordinates_from_map_url(map_location)
+            if map_coordinates:
+                coordinates = parse_coordinate_pair(','.join(map_coordinates))
+        if radius_meters is None or radius_meters <= 0:
+            self.add_error('radius_meters', 'Allowed radius must be greater than 0 meters.')
+        coordinates_are_zero = bool(
+            coordinates
+            and Decimal(str(coordinates[0])) == 0
+            and Decimal(str(coordinates[1])) == 0
+        )
+        if location_enabled and (not coordinates or coordinates_are_zero):
+            self.add_error(
+                'latitude_longitude',
+                'Select a valid map pin or enter valid latitude/longitude before enabling location attendance.',
+            )
+            return cleaned_data
         if coordinates:
             cleaned_data['latitude'], cleaned_data['longitude'] = coordinates
             cleaned_data['coordinates_resolved'] = True
@@ -472,6 +459,18 @@ class AssignedLocationAdminForm(forms.ModelForm):
             cleaned_data['map_url'] = f'https://www.google.com/maps/search/?api=1&query={quote_plus(address)}'
 
         return cleaned_data
+
+    class Media:
+        css = {
+            'all': (
+                'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
+                'people/admin_location_map.css',
+            )
+        }
+        js = (
+            'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
+            'people/admin_location_map.js',
+        )
 
 
 class UserProfileInline(admin.StackedInline):
@@ -523,11 +522,17 @@ class AssignedLocationInline(admin.StackedInline):
     fields = (
         'name',
         'address',
+        'latitude_longitude',
         'map_location',
+        'map_url',
+        'latitude',
+        'longitude',
+        'coordinates_resolved',
         'radius_meters',
         'effective_from',
         'effective_to',
         'is_active',
+        'face_verification_enabled',
         'map_link',
         'directions_link',
         'updated_at',
@@ -537,7 +542,10 @@ class AssignedLocationInline(admin.StackedInline):
     def map_link(self, obj):
         if not obj or obj.pk is None:
             return '-'
-        url = obj.map_url or f'https://www.google.com/maps?q={obj.latitude},{obj.longitude}'
+        url = obj.map_url or (
+            'https://www.google.com/maps?q='
+            f'{compact_decimal(obj.latitude)},{compact_decimal(obj.longitude)}'
+        )
         return format_html(
             '<a href="{}" target="_blank" rel="noopener">Open assigned location</a>',
             url,
@@ -552,8 +560,8 @@ class AssignedLocationInline(admin.StackedInline):
             return 'Map position pending'
         return format_html(
             '<a href="https://www.google.com/maps/dir/?api=1&destination={},{}" target="_blank" rel="noopener">Open directions</a>',
-            obj.latitude,
-            obj.longitude,
+            compact_decimal(obj.latitude),
+            compact_decimal(obj.longitude),
         )
 
     directions_link.short_description = 'Directions'
@@ -570,10 +578,18 @@ class AssignedLocationAdmin(admin.ModelAdmin):
         'effective_from',
         'effective_to',
         'is_active',
+        'face_verification_enabled',
         'map_status',
         'updated_at',
     )
-    list_filter = ('is_active', 'radius_meters', 'coordinates_resolved', 'effective_from', 'effective_to')
+    list_filter = (
+        'is_active',
+        'face_verification_enabled',
+        'radius_meters',
+        'coordinates_resolved',
+        'effective_from',
+        'effective_to',
+    )
     search_fields = (
         'user__username',
         'user__first_name',
@@ -586,11 +602,17 @@ class AssignedLocationAdmin(admin.ModelAdmin):
         'user',
         'name',
         'address',
+        'latitude_longitude',
         'map_location',
+        'map_url',
+        'latitude',
+        'longitude',
+        'coordinates_resolved',
         'radius_meters',
         'effective_from',
         'effective_to',
         'is_active',
+        'face_verification_enabled',
         'map_link',
         'directions_link',
         'updated_at',
@@ -628,8 +650,8 @@ class AssignedLocationAdmin(admin.ModelAdmin):
             return 'Map position pending'
         return format_html(
             '<a href="https://www.google.com/maps/dir/?api=1&destination={},{}" target="_blank" rel="noopener">Open directions</a>',
-            obj.latitude,
-            obj.longitude,
+            compact_decimal(obj.latitude),
+            compact_decimal(obj.longitude),
         )
 
     directions_link.short_description = 'Directions'
@@ -668,8 +690,8 @@ class AttendanceInline(admin.TabularInline):
     def location_link(self, obj):
         return format_html(
             '<a href="https://www.google.com/maps?q={},{}" target="_blank" rel="noopener">Open map</a>',
-            obj.latitude,
-            obj.longitude,
+            compact_decimal(obj.latitude),
+            compact_decimal(obj.longitude),
         )
 
     location_link.short_description = 'Location'
@@ -706,7 +728,7 @@ USER_ADMIN_PROFILE_FIELDS = (
 class UserAdmin(DjangoUserAdmin):
     form = HealOnUserChangeForm
     add_form = HealOnUserCreationForm
-    inlines = []
+    inlines = [AssignedLocationInline, AttendanceInline]
     fieldsets = (
         (
             None,
@@ -944,14 +966,43 @@ class AttendanceAdmin(admin.ModelAdmin):
     def location_link(self, obj):
         return format_html(
             '<a href="https://www.google.com/maps?q={},{}" target="_blank" rel="noopener">Open map</a>',
-            obj.latitude,
-            obj.longitude,
+            compact_decimal(obj.latitude),
+            compact_decimal(obj.longitude),
         )
 
     def photo_biometric_preview(self, obj):
         return biometric_image_preview(obj.photo_biometric)
 
     photo_biometric_preview.short_description = 'Photo biometric'
+
+
+@admin.register(AttendanceSettings)
+class AttendanceSettingsAdmin(admin.ModelAdmin):
+    list_display = ('name', 'require_face_verification', 'updated_at')
+    fields = ('name', 'face_recognition_enabled', 'updated_at')
+    readonly_fields = ('updated_at',)
+
+    def formfield_for_dbfield(self, db_field, request, **kwargs):
+        formfield = super().formfield_for_dbfield(db_field, request, **kwargs)
+        if db_field.name == 'face_recognition_enabled':
+            formfield.label = 'Require Face Verification'
+            formfield.help_text = (
+                'Enable biometric face matching during check-in/check-out. '
+                'Disable to keep normal photo capture only.'
+            )
+        return formfield
+
+    def require_face_verification(self, obj):
+        return obj.face_recognition_enabled
+
+    require_face_verification.boolean = True
+    require_face_verification.short_description = 'Require Face Verification'
+
+    def has_add_permission(self, request):
+        return not AttendanceSettings.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(AttendanceRegularization)
@@ -1225,18 +1276,18 @@ def build_healon_dashboard_context():
                 'url': f'{admin_url(LeaveRequest)}?status__exact={LeaveRequest.STATUS_PENDING}',
             },
             {
-                'label': 'Open Tickets',
-                'value': open_ticket_count,
-                'icon': 'fas fa-headset',
-                'tone': 'blue',
-                'url': admin_url(HelpdeskTicket),
-            },
-            {
                 'label': 'Payroll Processed',
                 'value': payroll_processed_count,
                 'icon': 'fas fa-wallet',
                 'tone': 'slate',
                 'url': f'{admin_url(SalaryRecord)}?is_published__exact=1',
+            },
+            {
+                'label': 'Open Tickets',
+                'value': open_ticket_count,
+                'icon': 'fas fa-headset',
+                'tone': 'blue',
+                'url': admin_url(HelpdeskTicket),
             },
         ],
         'chart_data': {
@@ -1267,7 +1318,7 @@ def build_healon_dashboard_context():
             {'label': 'Approve Leave', 'url': f'{admin_url(LeaveRequest)}?status__exact=pending', 'icon': 'fas fa-check'},
             {'label': 'Mark Attendance', 'url': admin_url(Attendance), 'icon': 'fas fa-calendar-plus'},
             {'label': 'Export Payroll', 'url': admin_url(SalaryRecord), 'icon': 'fas fa-file-export'},
-            {'label': 'Resolve Ticket', 'url': f'{admin_url(HelpdeskTicket)}?status__exact=open', 'icon': 'fas fa-tools'},
+            {'label': 'Helpdesk Support', 'url': f'{admin_url(HelpdeskTicket)}?status__exact=open', 'icon': 'fas fa-headset'},
         ],
     }
 

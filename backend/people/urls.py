@@ -2,6 +2,7 @@ from django.urls import path
 
 from .views import (
     AdminAttendanceApiView,
+    AdminAttendanceSettingsApiView,
     AdminDashboardStatsView,
     AdminDashboardView,
     AdminEmployeeDetailApiView,
@@ -74,6 +75,7 @@ urlpatterns = [
         name='admin-employee-location',
     ),
     path('admin/attendance/', AdminAttendanceApiView.as_view(), name='admin-attendance'),
+    path('admin/attendance-settings/', AdminAttendanceSettingsApiView.as_view(), name='admin-attendance-settings'),
     path('admin/reimbursements/', AdminReimbursementRequestsView.as_view(), name='admin-reimbursements'),
     path('admin/salary-records/', AdminSalaryRecordsView.as_view(), name='admin-salary-records'),
     path('admin/tasks/', AdminTasksApiView.as_view(), name='admin-tasks'),

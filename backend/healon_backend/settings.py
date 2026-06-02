@@ -4,15 +4,46 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+
+def load_env_file(path):
+    if not path.exists():
+        return
+    for raw_line in path.read_text(encoding='utf-8').splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith('#') or '=' not in line:
+            continue
+        key, value = line.split('=', 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        os.environ.setdefault(key, value)
+
+
+load_env_file(BASE_DIR / '.env')
+
 SECRET_KEY = 'healon-dev-secret-key'
 DEBUG = True
 ALLOWED_HOSTS = ['*']
 
-SMS_PROVIDER = os.environ.get('SMS_PROVIDER', 'console')
-TWILIO_ACCOUNT_SID = os.environ.get('TWILIO_ACCOUNT_SID', '')
-TWILIO_AUTH_TOKEN = os.environ.get('TWILIO_AUTH_TOKEN', '')
-TWILIO_FROM_NUMBER = os.environ.get('TWILIO_FROM_NUMBER', '')
-TWILIO_VERIFY_SERVICE_SID = os.environ.get('TWILIO_VERIFY_SERVICE_SID', '')
+EMAIL_OTP_EXPIRY_MINUTES = int(os.environ.get('EMAIL_OTP_EXPIRY_MINUTES', '10'))
+EMAIL_BACKEND = os.environ.get(
+    'EMAIL_BACKEND',
+    'django.core.mail.backends.smtp.EmailBackend',
+)
+EMAIL_HOST = os.environ.get('EMAIL_HOST', 'smtp.gmail.com')
+EMAIL_PORT = int(os.environ.get('EMAIL_PORT', '587'))
+EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
+EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', 'true').lower() in {
+    '1',
+    'true',
+    'yes',
+}
+EMAIL_USE_SSL = os.environ.get('EMAIL_USE_SSL', '').lower() in {'1', 'true', 'yes'}
+EMAIL_TIMEOUT = int(os.environ.get('EMAIL_TIMEOUT', '20'))
+DEFAULT_FROM_EMAIL = os.environ.get(
+    'DEFAULT_FROM_EMAIL',
+    EMAIL_HOST_USER or 'no-reply@healon.local',
+)
 
 INSTALLED_APPS = [
     'jazzmin',
@@ -108,6 +139,7 @@ JAZZMIN_SETTINGS = {
         'people.UserProfile',
         'people.AssignedLocation',
         'people.Attendance',
+        'people.AttendanceSettings',
         'people.AttendanceRegularization',
         'people.SalaryRecord',
         'people.ReimbursementRequest',
@@ -122,6 +154,7 @@ JAZZMIN_SETTINGS = {
         'people.UserProfile': 'fas fa-id-badge',
         'people.AssignedLocation': 'fas fa-map-marker-alt',
         'people.Attendance': 'fas fa-calendar-check',
+        'people.AttendanceSettings': 'fas fa-user-shield',
         'people.AttendanceRegularization': 'fas fa-clipboard-list',
         'people.SalaryRecord': 'fas fa-wallet',
         'people.ReimbursementRequest': 'fas fa-file-invoice-dollar',

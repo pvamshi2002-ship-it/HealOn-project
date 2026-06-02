@@ -102,7 +102,7 @@ Future<String?> pickPhotoBiometric() async {
       height: video.videoHeight,
     );
     canvas.context2D.drawImage(video, 0, 0);
-    close(canvas.toDataUrl('image/jpeg', 0.86));
+    close(canvas.toDataUrl('image/png'));
   });
 
   actions.children.addAll([cancelButton, captureButton]);

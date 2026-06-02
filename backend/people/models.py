@@ -5,6 +5,27 @@ from django.db import models
 DEFAULT_ATTENDANCE_RADIUS_METERS = 100
 
 
+class AttendanceSettings(models.Model):
+    name = models.CharField(max_length=80, default='Default attendance settings', unique=True)
+    face_recognition_enabled = models.BooleanField(default=False)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Attendance setting'
+        verbose_name_plural = 'Attendance settings'
+
+    def __str__(self):
+        return self.name
+
+    @classmethod
+    def current(cls):
+        settings, _ = cls.objects.get_or_create(
+            pk=1,
+            defaults={'name': 'Default attendance settings'},
+        )
+        return settings
+
+
 class UserProfile(models.Model):
     GENDER_CHOICES = [
         ('male', 'Male'),
@@ -37,13 +58,14 @@ class AssignedLocation(models.Model):
     name = models.CharField(max_length=120, default='Work Location')
     address = models.TextField(help_text='Complete location address shown to admins and employees.')
     map_url = models.URLField(max_length=500, blank=True)
-    latitude = models.DecimalField(max_digits=9, decimal_places=6, default=0)
-    longitude = models.DecimalField(max_digits=9, decimal_places=6, default=0)
+    latitude = models.DecimalField(max_digits=18, decimal_places=15, default=0)
+    longitude = models.DecimalField(max_digits=18, decimal_places=15, default=0)
     coordinates_resolved = models.BooleanField(default=False)
     radius_meters = models.PositiveIntegerField(default=DEFAULT_ATTENDANCE_RADIUS_METERS)
     effective_from = models.DateField(null=True, blank=True)
     effective_to = models.DateField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
+    face_verification_enabled = models.BooleanField(default=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -88,8 +110,8 @@ class Attendance(models.Model):
     )
     location_address = models.TextField(blank=True)
     distance_meters = models.FloatField(null=True, blank=True)
-    latitude = models.DecimalField(max_digits=9, decimal_places=6)
-    longitude = models.DecimalField(max_digits=9, decimal_places=6)
+    latitude = models.DecimalField(max_digits=18, decimal_places=15)
+    longitude = models.DecimalField(max_digits=18, decimal_places=15)
     accuracy = models.FloatField(null=True, blank=True)
     photo_biometric = models.TextField(blank=True)
     timestamp = models.DateTimeField(auto_now_add=True)

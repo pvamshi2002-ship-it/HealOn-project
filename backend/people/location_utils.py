@@ -1,8 +1,29 @@
 import json
 import re
+from decimal import Decimal, InvalidOperation
 from urllib.error import URLError
 from urllib.parse import parse_qs, quote_plus, unquote, urlparse
 from urllib.request import Request, urlopen
+
+
+def parse_coordinate_pair(value):
+    text = (value or '').strip()
+    if not text:
+        return None
+    match = re.fullmatch(
+        r'\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*',
+        text,
+    )
+    if not match:
+        return None
+    try:
+        latitude = Decimal(match.group(1))
+        longitude = Decimal(match.group(2))
+    except InvalidOperation:
+        return None
+    if Decimal('-90') <= latitude <= Decimal('90') and Decimal('-180') <= longitude <= Decimal('180'):
+        return str(latitude), str(longitude)
+    return None
 
 
 def extract_coordinates_from_map_url(value):
@@ -16,6 +37,7 @@ def extract_coordinates_from_map_url(value):
         r'[?&](?:q|query|ll)=(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)',
         r'!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)',
         r'^(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)$',
+        r'(?<!\d)(-?\d{1,2}\.\d+),\s*(-?\d{1,3}\.\d+)(?!\d)',
     ]
     for pattern in patterns:
         match = re.search(pattern, decoded)
