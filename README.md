@@ -103,7 +103,7 @@ cd "D:\projects\healOn project\backend"
 - Reimbursement request upload.
 - Helpdesk ticket management.
 - Task tracking.
-- Firebase phone authentication for password reset OTPs.
+-Email OTP verification validates a user's identity by sending a one-time password to their registered email address.
 
 ## Password Reset OTP
 
