@@ -1,4 +1,50 @@
 (function () {
+  var MAX_PHOTO_DIMENSION = 960;
+  var JPEG_QUALITY = 0.82;
+
+  function compressDataUrl(dataUrl, callback) {
+    var image = new Image();
+    image.onload = function () {
+      var width = image.width;
+      var height = image.height;
+      var scale = Math.min(1, MAX_PHOTO_DIMENSION / Math.max(width, height));
+      var targetWidth = Math.max(1, Math.round(width * scale));
+      var targetHeight = Math.max(1, Math.round(height * scale));
+      var canvas = document.createElement('canvas');
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+      canvas.getContext('2d').drawImage(image, 0, 0, targetWidth, targetHeight);
+      callback(canvas.toDataURL('image/jpeg', JPEG_QUALITY));
+    };
+    image.onerror = function () {
+      callback(dataUrl);
+    };
+    image.src = dataUrl;
+  }
+
+  function applyPhotoValue(textarea, preview, message, dataUrl, successText) {
+    compressDataUrl(dataUrl, function (compressedDataUrl) {
+      textarea.value = compressedDataUrl;
+      preview.src = compressedDataUrl;
+      message.style.color = '#4b5563';
+      message.textContent = successText;
+      textarea.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  }
+
+  function showServerValidationErrors(textarea, message) {
+    var fieldRow =
+      textarea.closest('.form-row') ||
+      textarea.closest('.field-profile_photo_biometric') ||
+      textarea.parentElement;
+    if (!fieldRow) return;
+    var errorList = fieldRow.querySelector('.errorlist');
+    if (!errorList) return;
+    message.style.color = '#b91c1c';
+    message.style.fontWeight = '600';
+    message.textContent = errorList.textContent.trim();
+  }
+
   function setButtonStyle(button, primary) {
     button.style.border = primary ? '0' : '1px solid #d1d5db';
     button.style.borderRadius = '6px';
@@ -92,6 +138,7 @@
     wrapper.appendChild(message);
     wrapper.appendChild(actions);
     textarea.parentNode.insertBefore(wrapper, textarea);
+    showServerValidationErrors(textarea, message);
 
     var stream = null;
 
@@ -180,16 +227,20 @@
       reader.onload = function () {
         var dataUrl = String(reader.result || '');
         if (!dataUrl.startsWith('data:image/')) {
+          message.style.color = '#b91c1c';
           message.textContent = 'Uploaded file could not be read as an image.';
           return;
         }
         stopCamera();
-        textarea.value = dataUrl;
-        preview.src = dataUrl;
-        message.textContent = 'Photo uploaded for check-in/check-out verification.';
+        applyPhotoValue(
+          textarea,
+          preview,
+          message,
+          dataUrl,
+          'Photo uploaded for check-in/check-out verification.',
+        );
         showCapturedState();
         uploadInput.value = '';
-        textarea.dispatchEvent(new Event('change', { bubbles: true }));
       };
       reader.onerror = function () {
         message.textContent = 'Unable to read the uploaded photo. Please try again.';
@@ -206,13 +257,15 @@
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
       canvas.getContext('2d').drawImage(video, 0, 0);
-      var dataUrl = canvas.toDataURL('image/png');
-      textarea.value = dataUrl;
-      preview.src = dataUrl;
-      message.textContent = 'Photo captured for check-in/check-out verification.';
+      applyPhotoValue(
+        textarea,
+        preview,
+        message,
+        canvas.toDataURL('image/png'),
+        'Photo captured for check-in/check-out verification.',
+      );
       stopCamera();
       showCapturedState();
-      textarea.dispatchEvent(new Event('change', { bubbles: true }));
     });
   }
 

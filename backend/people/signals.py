@@ -6,9 +6,13 @@ from .models import UserProfile
 
 
 @receiver(post_save, sender=get_user_model())
-def ensure_user_profile(sender, instance, created, **kwargs):
-    if created and not instance.is_staff:
-        UserProfile.objects.get_or_create(
-            user=instance,
-            defaults={'employee_code': instance.username.upper()},
-        )
+def ensure_user_profile(sender, instance, **kwargs):
+    if instance.is_superuser:
+        return
+    UserProfile.objects.get_or_create(
+        user=instance,
+        defaults={
+            'employee_code': instance.username.upper(),
+            'can_access_user_dashboard': True,
+        },
+    )

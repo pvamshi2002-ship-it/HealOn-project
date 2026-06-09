@@ -283,7 +283,10 @@
     }
 
     const form = input.closest('form');
-    if (form && form.dataset.healonLocationSubmitGuard !== '1') {
+    const shouldGuardSubmit = /\/admin\/people\/assignedlocation\//.test(
+      location.pathname,
+    );
+    if (form && shouldGuardSubmit && form.dataset.healonLocationSubmitGuard !== '1') {
       form.dataset.healonLocationSubmitGuard = '1';
       form.addEventListener('submit', function (event) {
         const invalidPicker = Array.from(

@@ -23,6 +23,9 @@ class Command(BaseCommand):
                     'department': 'Administration',
                     'designation': 'System Admin',
                     'mobile_number': '9000000001',
+                    'can_access_user_dashboard': False,
+                    'can_access_admin_dashboard': True,
+                    'can_access_hr_dashboard': False,
                 },
             },
             {
@@ -39,6 +42,9 @@ class Command(BaseCommand):
                     'department': 'Operations',
                     'designation': 'Employee',
                     'mobile_number': '9000000002',
+                    'can_access_user_dashboard': True,
+                    'can_access_admin_dashboard': False,
+                    'can_access_hr_dashboard': False,
                 },
             },
             {
@@ -55,6 +61,9 @@ class Command(BaseCommand):
                     'department': 'HR',
                     'designation': 'HR Manager',
                     'mobile_number': '9000000003',
+                    'can_access_user_dashboard': True,
+                    'can_access_admin_dashboard': False,
+                    'can_access_hr_dashboard': True,
                 },
             },
         ]

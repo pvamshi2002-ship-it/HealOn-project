@@ -1,3 +1,4 @@
+import logging
 import re
 import json
 import csv
@@ -7,13 +8,14 @@ from urllib.parse import parse_qs, quote_plus, unquote, urlparse
 from urllib.request import Request, urlopen
 
 from django import forms
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.contrib.auth.models import Group
 from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 from django.contrib.auth.forms import UserCreationForm
 from django.db.models import Count, Sum
 from django.http import HttpResponse
+from django.template.response import TemplateResponse
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.html import format_html
@@ -47,6 +49,7 @@ from .password_rules import validate_password_rules
 
 
 User = get_user_model()
+logger = logging.getLogger(__name__)
 
 try:
     admin.site.unregister(Group)
@@ -93,6 +96,69 @@ def status_badge(value, label=None):
 def compact_decimal(value):
     decimal_value = Decimal(str(value or 0))
     return format(decimal_value.normalize(), 'f')
+
+
+def apply_user_identity_from_form(user, cleaned_data):
+    first_name = (cleaned_data.get('first_name') or '').strip()
+    last_name = (cleaned_data.get('last_name') or '').strip()
+    display_name = (cleaned_data.get('display_name') or '').strip()
+    if display_name and (not first_name or not last_name):
+        display_first_name, _, display_last_name = display_name.partition(' ')
+        first_name = first_name or display_first_name.strip()
+        last_name = last_name or display_last_name.strip()
+    user.first_name = first_name
+    user.last_name = last_name
+    email = (cleaned_data.get('email') or '').strip()
+    if email:
+        user.email = email
+    if user.is_superuser:
+        user.is_staff = True
+    else:
+        user.is_staff = bool(cleaned_data.get('can_access_admin_dashboard'))
+    return user
+
+
+def user_profile_defaults(user, cleaned_data):
+    profile = getattr(user, 'userprofile', None)
+    photo = (cleaned_data.get('profile_photo_biometric') or '').strip()
+    if not photo and profile:
+        photo = profile.profile_photo_biometric or ''
+
+    return {
+        'employee_code': (cleaned_data.get('employee_code') or '').strip()
+        or user.username.upper(),
+        'mobile_number': (cleaned_data.get('mobile_number') or '').strip(),
+        'profile_photo_biometric': photo,
+        'gender': cleaned_data.get('gender') or '',
+        'date_of_birth': cleaned_data.get('date_of_birth'),
+        'department': (cleaned_data.get('department') or '').strip(),
+        'designation': (cleaned_data.get('designation') or '').strip() or 'Employee',
+        'can_access_user_dashboard': bool(
+            cleaned_data.get('can_access_user_dashboard')
+        ),
+        'can_access_admin_dashboard': bool(
+            cleaned_data.get('can_access_admin_dashboard')
+        ),
+        'can_access_hr_dashboard': bool(cleaned_data.get('can_access_hr_dashboard')),
+    }
+
+
+def persist_user_profile(user, cleaned_data):
+    if not cleaned_data:
+        return None
+    profile, created = UserProfile.objects.update_or_create(
+        user=user,
+        defaults=user_profile_defaults(user, cleaned_data),
+    )
+    logger.info(
+        'Persisted UserProfile for user_id=%s username=%s created=%s mobile=%s employee_code=%s',
+        user.pk,
+        user.username,
+        created,
+        profile.mobile_number,
+        profile.employee_code,
+    )
+    return profile
 
 
 def biometric_image_preview(value, width=120, height=90):
@@ -173,48 +239,51 @@ class HealOnUserCreationForm(UserCreationForm):
 
     def clean_profile_photo_biometric(self):
         value = (self.cleaned_data.get('profile_photo_biometric') or '').strip()
+        if not value:
+            raise forms.ValidationError(
+                'Employee verification photo is required. Use Take Photo or Upload Photo before saving.'
+            )
         if not value.startswith('data:image/') or ',' not in value:
             raise forms.ValidationError(
-                'Employee verification photo must be a captured image data URL.'
+                'Employee verification photo must be a captured or uploaded image.'
             )
         return value
 
+    def clean(self):
+        cleaned_data = super().clean()
+        if self.errors:
+            return cleaned_data
+        if not any([
+            cleaned_data.get('can_access_user_dashboard'),
+            cleaned_data.get('can_access_admin_dashboard'),
+            cleaned_data.get('can_access_hr_dashboard'),
+        ]):
+            cleaned_data['can_access_user_dashboard'] = True
+        missing = []
+        if not (cleaned_data.get('username') or '').strip():
+            missing.append('username')
+        if not (cleaned_data.get('email') or '').strip():
+            missing.append('email')
+        if not (cleaned_data.get('display_name') or '').strip():
+            missing.append('display name')
+        if not cleaned_data.get('password1') or not cleaned_data.get('password2'):
+            missing.append('password')
+        if not (cleaned_data.get('profile_photo_biometric') or '').strip():
+            missing.append('employee verification photo')
+        if missing:
+            raise forms.ValidationError(
+                'Please complete the required employee fields before saving: '
+                + ', '.join(missing)
+                + '.'
+            )
+        return cleaned_data
+
     def save(self, commit=True):
         user = super().save(commit=False)
-        first_name = self.cleaned_data['first_name']
-        last_name = self.cleaned_data['last_name']
-        display_name = self.cleaned_data.get('display_name') or ''
-        if display_name and (not first_name or not last_name):
-            display_first_name, _, display_last_name = display_name.partition(' ')
-            first_name = first_name or display_first_name
-            last_name = last_name or display_last_name
-        user.first_name = first_name
-        user.last_name = last_name
-        user.email = self.cleaned_data['email']
-        user.is_staff = self.cleaned_data['can_access_admin_dashboard']
+        apply_user_identity_from_form(user, self.cleaned_data)
         if commit:
             user.save()
-            UserProfile.objects.update_or_create(
-                user=user,
-                defaults={
-                    'employee_code': self.cleaned_data.get('employee_code') or user.username.upper(),
-                    'mobile_number': self.cleaned_data.get('mobile_number') or '',
-                    'profile_photo_biometric': self.cleaned_data.get('profile_photo_biometric') or '',
-                    'gender': self.cleaned_data.get('gender') or '',
-                    'date_of_birth': self.cleaned_data.get('date_of_birth'),
-                    'department': self.cleaned_data.get('department') or '',
-                    'designation': self.cleaned_data.get('designation') or 'Employee',
-                    'can_access_user_dashboard': self.cleaned_data[
-                        'can_access_user_dashboard'
-                    ],
-                    'can_access_admin_dashboard': self.cleaned_data[
-                        'can_access_admin_dashboard'
-                    ],
-                    'can_access_hr_dashboard': self.cleaned_data[
-                        'can_access_hr_dashboard'
-                    ],
-                },
-            )
+            persist_user_profile(user, self.cleaned_data)
         return user
 
     class Media:
@@ -227,7 +296,7 @@ class HealOnUserChangeForm(forms.ModelForm):
     mobile_number = forms.CharField(max_length=20, required=False)
     profile_photo_biometric = forms.CharField(
         label='Employee verification photo',
-        required=True,
+        required=False,
         widget=PhotoBiometricCaptureWidget(),
         help_text='Required for check-in/check-out photo verification. Capture, recapture, or upload the employee photo before saving.',
     )
@@ -275,20 +344,59 @@ class HealOnUserChangeForm(forms.ModelForm):
             self.fields['date_of_birth'].initial = profile.date_of_birth
             self.fields['department'].initial = profile.department
             self.fields['designation'].initial = profile.designation
+            # Set initial values for dashboard permissions from profile
             self.fields['can_access_user_dashboard'].initial = profile.can_access_user_dashboard
             self.fields['can_access_admin_dashboard'].initial = profile.can_access_admin_dashboard
             self.fields['can_access_hr_dashboard'].initial = profile.can_access_hr_dashboard
+        else:
+            # For new users, default to user dashboard access
+            self.fields['can_access_user_dashboard'].initial = True
 
     def clean_profile_photo_biometric(self):
         value = (self.cleaned_data.get('profile_photo_biometric') or '').strip()
-        if not value.startswith('data:image/') or ',' not in value:
+        profile = getattr(self.instance, 'userprofile', None)
+        existing_photo = profile.profile_photo_biometric if profile else ''
+
+        if self.instance and self.instance.pk:
+            if not value and existing_photo:
+                return existing_photo
+            elif not value and not existing_photo:
+                return ''
+
+        if value:
+            if not value.startswith('data:image/') or ',' not in value:
+                raise forms.ValidationError(
+                    'Employee verification photo must be a captured image data URL.'
+                )
+            return value
+
+        if not self.instance or not self.instance.pk:
             raise forms.ValidationError(
-                'Employee verification photo must be a captured image data URL.'
+                'Employee verification photo is required. Capture or upload a photo before saving.'
             )
+
         return value
 
     def clean(self):
         cleaned_data = super().clean()
+
+        if self.instance and self.instance.pk:
+            profile = getattr(self.instance, 'userprofile', None)
+            has_any_permission = any([
+                cleaned_data.get('can_access_user_dashboard'),
+                cleaned_data.get('can_access_admin_dashboard'),
+                cleaned_data.get('can_access_hr_dashboard'),
+            ])
+
+            if not has_any_permission and profile:
+                cleaned_data['can_access_user_dashboard'] = profile.can_access_user_dashboard
+                cleaned_data['can_access_admin_dashboard'] = profile.can_access_admin_dashboard
+                cleaned_data['can_access_hr_dashboard'] = profile.can_access_hr_dashboard
+            elif not has_any_permission and not profile:
+                cleaned_data['can_access_user_dashboard'] = True
+                cleaned_data['can_access_admin_dashboard'] = False
+                cleaned_data['can_access_hr_dashboard'] = False
+
         if not any([
             cleaned_data.get('can_access_user_dashboard'),
             cleaned_data.get('can_access_admin_dashboard'),
@@ -297,9 +405,16 @@ class HealOnUserChangeForm(forms.ModelForm):
             raise forms.ValidationError('Select at least one dashboard permission.')
         return cleaned_data
 
+    def save(self, commit=True):
+        user = super().save(commit=False)
+        apply_user_identity_from_form(user, self.cleaned_data)
+        if commit:
+            user.save()
+            persist_user_profile(user, self.cleaned_data)
+        return user
+
     class Media:
         js = ('people/admin_employee_form.js',)
-
 
 
 class AssignedLocationAdminForm(forms.ModelForm):
@@ -346,24 +461,10 @@ class AssignedLocationAdminForm(forms.ModelForm):
 
     class Meta:
         model = AssignedLocation
-        fields = '__all__'
-        widgets = {
-            'map_url': forms.HiddenInput(),
-            'latitude': forms.HiddenInput(),
-            'longitude': forms.HiddenInput(),
-            'coordinates_resolved': forms.HiddenInput(),
-        }
+        exclude = ('map_url', 'latitude', 'longitude', 'coordinates_resolved')
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        if 'latitude' in self.fields:
-            self.fields['latitude'].required = False
-        if 'longitude' in self.fields:
-            self.fields['longitude'].required = False
-        if 'map_url' in self.fields:
-            self.fields['map_url'].required = False
-        if 'coordinates_resolved' in self.fields:
-            self.fields['coordinates_resolved'].required = False
         self.fields['radius_meters'].help_text = (
             'Allowed GPS radius in meters. Must be greater than 0 when saved.'
         )
@@ -391,9 +492,6 @@ class AssignedLocationAdminForm(forms.ModelForm):
                 'address',
                 'latitude_longitude',
                 'map_location',
-                'map_url',
-                'latitude',
-                'longitude',
             )
         )
 
@@ -401,6 +499,36 @@ class AssignedLocationAdminForm(forms.ModelForm):
         if self._is_empty_attached_inline():
             return False
         return super().has_changed()
+
+    def _existing_coordinate_text(self):
+        if self.instance.latitude == 0 and self.instance.longitude == 0:
+            return ''
+        return f'{self.instance.latitude},{self.instance.longitude}'
+
+    def _location_inputs_changed(self, cleaned_data):
+        if not self.instance or not self.instance.pk:
+            return True
+        address = (cleaned_data.get('address') or '').strip()
+        map_location = (cleaned_data.get('map_location') or '').strip()
+        coordinate_text = (cleaned_data.get('latitude_longitude') or '').strip()
+        location_enabled = cleaned_data.get('is_active')
+        radius_meters = cleaned_data.get('radius_meters')
+        if address != (self.instance.address or '').strip():
+            return True
+        if map_location != (self.instance.map_url or '').strip():
+            return True
+        if bool(location_enabled) != bool(self.instance.is_active):
+            return True
+        if radius_meters != self.instance.radius_meters:
+            return True
+        return coordinate_text != self._existing_coordinate_text().strip()
+
+    def _preserve_existing_location_state(self, cleaned_data):
+        cleaned_data['latitude'] = self.instance.latitude
+        cleaned_data['longitude'] = self.instance.longitude
+        cleaned_data['coordinates_resolved'] = self.instance.coordinates_resolved
+        cleaned_data['map_url'] = self.instance.map_url
+        return cleaned_data
 
     def clean(self):
         cleaned_data = super().clean()
@@ -410,15 +538,13 @@ class AssignedLocationAdminForm(forms.ModelForm):
             cleaned_data['longitude'] = 0
             cleaned_data['coordinates_resolved'] = False
             return cleaned_data
+        if self.instance and self.instance.pk and not self._location_inputs_changed(cleaned_data):
+            return self._preserve_existing_location_state(cleaned_data)
         address = (cleaned_data.get('address') or '').strip()
         map_location = (cleaned_data.get('map_location') or '').strip()
         coordinate_text = (cleaned_data.get('latitude_longitude') or '').strip()
         location_enabled = cleaned_data.get('is_active')
         radius_meters = cleaned_data.get('radius_meters')
-        hidden_coordinate_text = '{},{}'.format(
-            cleaned_data.get('latitude') or '',
-            cleaned_data.get('longitude') or '',
-        )
         coordinates = parse_coordinate_pair(coordinate_text) if coordinate_text else None
         if coordinate_text and coordinates is None:
             self.add_error(
@@ -426,8 +552,6 @@ class AssignedLocationAdminForm(forms.ModelForm):
                 'Enter coordinates as latitude,longitude with latitude between -90 and 90 and longitude between -180 and 180.',
             )
             return cleaned_data
-        if not coordinates:
-            coordinates = parse_coordinate_pair(hidden_coordinate_text)
         if not coordinates:
             map_coordinates = extract_coordinates_from_map_url(map_location)
             if map_coordinates:
@@ -440,17 +564,23 @@ class AssignedLocationAdminForm(forms.ModelForm):
             and Decimal(str(coordinates[1])) == 0
         )
         if location_enabled and (not coordinates or coordinates_are_zero):
-            self.add_error(
-                'latitude_longitude',
-                'Select a valid map pin or enter valid latitude/longitude before enabling location attendance.',
+            message = (
+                'Select a valid map pin or enter valid latitude/longitude '
+                'before enabling location attendance.'
+            )
+            self.add_error('latitude_longitude', message)
+            logger.warning(
+                'AssignedLocation validation failed for user_id=%s: %s',
+                getattr(self.instance, 'user_id', None),
+                message,
             )
             return cleaned_data
         if coordinates:
             cleaned_data['latitude'], cleaned_data['longitude'] = coordinates
             cleaned_data['coordinates_resolved'] = True
         else:
-            cleaned_data['latitude'] = cleaned_data.get('latitude') or 0
-            cleaned_data['longitude'] = cleaned_data.get('longitude') or 0
+            cleaned_data['latitude'] = 0
+            cleaned_data['longitude'] = 0
             cleaned_data['coordinates_resolved'] = False
 
         if map_location:
@@ -459,6 +589,15 @@ class AssignedLocationAdminForm(forms.ModelForm):
             cleaned_data['map_url'] = f'https://www.google.com/maps/search/?api=1&query={quote_plus(address)}'
 
         return cleaned_data
+
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+        for field_name in ('map_url', 'latitude', 'longitude', 'coordinates_resolved'):
+            if field_name in self.cleaned_data:
+                setattr(instance, field_name, self.cleaned_data[field_name])
+        if commit:
+            instance.save()
+        return instance
 
     class Media:
         css = {
@@ -524,10 +663,6 @@ class AssignedLocationInline(admin.StackedInline):
         'address',
         'latitude_longitude',
         'map_location',
-        'map_url',
-        'latitude',
-        'longitude',
-        'coordinates_resolved',
         'radius_meters',
         'effective_from',
         'effective_to',
@@ -604,10 +739,6 @@ class AssignedLocationAdmin(admin.ModelAdmin):
         'address',
         'latitude_longitude',
         'map_location',
-        'map_url',
-        'latitude',
-        'longitude',
-        'coordinates_resolved',
         'radius_meters',
         'effective_from',
         'effective_to',
@@ -791,43 +922,61 @@ class UserAdmin(DjangoUserAdmin):
         return profile.designation if profile else ''
 
     def save_model(self, request, obj, form, change):
-        if change and hasattr(form, 'cleaned_data'):
-            display_name = form.cleaned_data.get('display_name') or ''
-            first_name = form.cleaned_data.get('first_name') or ''
-            last_name = form.cleaned_data.get('last_name') or ''
-            if display_name and (not first_name or not last_name):
-                display_first_name, _, display_last_name = display_name.partition(' ')
-                first_name = first_name or display_first_name
-                last_name = last_name or display_last_name
-            obj.first_name = first_name
-            obj.last_name = last_name
-            obj.is_staff = bool(form.cleaned_data.get('can_access_admin_dashboard'))
         super().save_model(request, obj, form, change)
-        if change and hasattr(form, 'cleaned_data'):
-            UserProfile.objects.update_or_create(
-                user=obj,
-                defaults={
-                    'employee_code': form.cleaned_data.get('employee_code') or obj.username.upper(),
-                    'mobile_number': form.cleaned_data.get('mobile_number') or '',
-                    'profile_photo_biometric': form.cleaned_data.get('profile_photo_biometric') or '',
-                    'gender': form.cleaned_data.get('gender') or '',
-                    'date_of_birth': form.cleaned_data.get('date_of_birth'),
-                    'department': form.cleaned_data.get('department') or '',
-                    'designation': form.cleaned_data.get('designation') or 'Employee',
-                    'can_access_user_dashboard': form.cleaned_data.get(
-                        'can_access_user_dashboard',
-                        True,
-                    ),
-                    'can_access_admin_dashboard': form.cleaned_data.get(
-                        'can_access_admin_dashboard',
-                        False,
-                    ),
-                    'can_access_hr_dashboard': form.cleaned_data.get(
-                        'can_access_hr_dashboard',
-                        False,
-                    ),
-                },
+        cleaned_data = getattr(form, 'cleaned_data', None)
+        try:
+            persist_user_profile(obj, cleaned_data)
+        except Exception:
+            logger.exception(
+                'Failed to persist UserProfile during admin save for user_id=%s username=%s',
+                obj.pk,
+                obj.username,
             )
+            raise
+
+    def changeform_view(self, request, object_id=None, form_url='', extra_context=None):
+        response = super().changeform_view(
+            request,
+            object_id,
+            form_url,
+            extra_context,
+        )
+        if request.method != 'POST' or not isinstance(response, TemplateResponse):
+            return response
+        context = response.context_data or {}
+        adminform = context.get('adminform')
+        if adminform and adminform.form.errors:
+            error_summary = '; '.join(
+                f'{field}: {", ".join(errors)}'
+                for field, errors in adminform.form.errors.items()
+            )
+            logger.warning(
+                'User admin save rejected for %s: form_errors=%s',
+                object_id or 'new',
+                adminform.form.errors,
+            )
+            messages.error(
+                request,
+                f'Employee was not saved. Fix the highlighted errors below. {error_summary}',
+            )
+        for inline in context.get('inline_admin_formsets', []):
+            if not (inline.formset.errors or inline.formset.non_form_errors()):
+                continue
+            inline_model = getattr(getattr(inline, 'opts', None), 'model', None)
+            inline_name = inline_model.__name__ if inline_model else 'related record'
+            logger.warning(
+                'User admin inline save rejected for %s model=%s errors=%s non_form_errors=%s',
+                object_id or 'new',
+                inline_name,
+                inline.formset.errors,
+                inline.formset.non_form_errors(),
+            )
+            messages.error(
+                request,
+                f'Employee was not saved because {inline_name} has validation errors. '
+                'Review the assigned location section below.',
+            )
+        return response
 
     def dashboard_permissions(self, obj):
         profile = getattr(obj, 'userprofile', None)
@@ -865,6 +1014,9 @@ class UserAdmin(DjangoUserAdmin):
 
 @admin.register(UserProfile)
 class UserProfileAdmin(admin.ModelAdmin):
+    class Media:
+        js = ('people/admin_employee_form.js',)
+
     list_display = (
         'user',
         'employee_code',
@@ -902,7 +1054,6 @@ class UserProfileAdmin(admin.ModelAdmin):
         return biometric_image_preview(obj.profile_photo_biometric)
 
     profile_photo_preview.short_description = 'Verification photo'
-
 
 @admin.register(Attendance)
 class AttendanceAdmin(admin.ModelAdmin):
@@ -979,7 +1130,7 @@ class AttendanceAdmin(admin.ModelAdmin):
 @admin.register(AttendanceSettings)
 class AttendanceSettingsAdmin(admin.ModelAdmin):
     list_display = ('name', 'require_face_verification', 'updated_at')
-    fields = ('name', 'face_recognition_enabled', 'updated_at')
+    fields = ('name', 'face_recognition_enabled', 'face_match_threshold', 'updated_at')
     readonly_fields = ('updated_at',)
 
     def formfield_for_dbfield(self, db_field, request, **kwargs):

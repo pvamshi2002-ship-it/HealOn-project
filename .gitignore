@@ -1,6 +1,65 @@
+# Environment and secrets
 backend/.env
-*.pyc
+.env
+*.env.local
+
+# Python virtual environments
+backend/.venv/
+backend/venv/
+venv/
+.venv/
+
+# Python bytecode and caches
 __pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+*.egg-info/
+.eggs/
+dist/
+build/
+pip-wheel-metadata/
+
+# Django generated
+backend/staticfiles/
+backend/media/*
+!backend/media/.gitkeep
 *.log
-frontend/build/
+db.sqlite3-journal
+
+# Flutter / Dart
 frontend/.dart_tool/
+frontend/.flutter-plugins
+frontend/.flutter-plugins-dependencies
+frontend/.packages
+frontend/build/
+frontend/.pub-cache/
+frontend/.pub/
+frontend/**/ephemeral/
+frontend/**/Generated.xcconfig
+frontend/**/flutter_export_environment.sh
+
+# IDE and OS
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Node (if used for tooling)
+node_modules/
+
+# Local documentation drafts (tracked copies live in docs/)
+HealOn_Project_Documentation.md

@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 
+import 'healon_http.dart';
 import 'attendance_location_stub.dart'
     if (dart.library.html) 'attendance_location_web.dart'
     as attendance_location;
@@ -403,6 +404,14 @@ class _HomePageState extends State<HomePage> {
   Map<String, dynamic>? _adminTasks;
   Map<String, dynamic>? _selectedAdminAttendanceDetail;
   final Map<String, String> _pendingRequestActions = {};
+  final _hrNotificationSearchCtrl = TextEditingController();
+  String _hrNotificationCategoryFilter = 'All';
+  String _hrNotificationStatusFilter = 'All';
+  String _hrNotificationSort = 'newest';
+  int _hrNotificationPage = 0;
+  static const int _hrNotificationPageSize = 10;
+  Timer? _hrNotificationRefreshTimer;
+  final Set<String> _readHrNotificationIds = {};
   List<Map<String, dynamic>> _employeeLeaves = [];
   List<Map<String, dynamic>> _employeeTasks = [];
   List<Map<String, dynamic>> _helpdeskTickets = [];
@@ -859,6 +868,8 @@ class _HomePageState extends State<HomePage> {
     _salaryIncentivesCtrl.dispose();
     _bonusAmountCtrl.dispose();
     _incentiveAmountCtrl.dispose();
+    _hrNotificationSearchCtrl.dispose();
+    _hrNotificationRefreshTimer?.cancel();
     super.dispose();
   }
 
@@ -887,7 +898,7 @@ class _HomePageState extends State<HomePage> {
       return null;
     }
 
-    final resp = await http.get(
+    final resp = await healonHttpClient.get(
       Uri.parse('$backendUrl$path'),
       headers: {'Authorization': 'Token $_token'},
     );
@@ -917,7 +928,7 @@ class _HomePageState extends State<HomePage> {
       _faceRecognitionEnabled = enabled;
     });
     try {
-      final resp = await http.patch(
+      final resp = await healonHttpClient.patch(
         Uri.parse('$backendUrl/api/admin/attendance-settings/'),
         headers: {
           'Content-Type': 'application/json',
@@ -1077,7 +1088,7 @@ class _HomePageState extends State<HomePage> {
     });
 
     try {
-      final resp = await http.post(
+      final resp = await healonHttpClient.post(
         Uri.parse('$backendUrl/api/password-reset/request/'),
         body: {'email': _resetEmailCtrl.text.trim()},
       );
@@ -1121,7 +1132,7 @@ class _HomePageState extends State<HomePage> {
     });
 
     try {
-      final resp = await http.post(
+      final resp = await healonHttpClient.post(
         Uri.parse('$backendUrl/api/password-reset/verify/'),
         body: {
           'email': _resetEmailCtrl.text.trim(),
@@ -1165,7 +1176,7 @@ class _HomePageState extends State<HomePage> {
     });
 
     try {
-      final resp = await http.post(
+      final resp = await healonHttpClient.post(
         Uri.parse('$backendUrl/api/password-reset/confirm/'),
         body: {
           'email': _resetEmailCtrl.text.trim(),
@@ -1383,7 +1394,9 @@ class _HomePageState extends State<HomePage> {
               [];
           _currentUser = userDashboard?['user'] as Map<String, dynamic>?;
         });
+        _loadHrNotificationReadState();
         await _loadAdminTasks();
+        await _loadAdminSalaryRecords();
       } else {
         final dashboard = await _apiGet('/api/dashboard/');
         final leaves = await _apiGet('/api/employee/leaves/');
@@ -1590,7 +1603,7 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
-    final resp = await http.post(
+    final resp = await healonHttpClient.post(
       Uri.parse('$backendUrl/api/checkout/'),
       headers: {
         'Content-Type': 'application/json',
@@ -1632,7 +1645,7 @@ class _HomePageState extends State<HomePage> {
     setState(() => _isLoading = true);
     try {
       final requestedRole = _selectedRole;
-      final resp = await http.post(
+      final resp = await healonHttpClient.post(
         Uri.parse('$backendUrl/api/auth/'),
         body: {
           'username': _empIdCtrl.text,
@@ -1793,7 +1806,7 @@ class _HomePageState extends State<HomePage> {
     }
 
     try {
-      final resp = await http.post(
+      final resp = await healonHttpClient.post(
         Uri.parse('$backendUrl/api/employee/helpdesk/'),
         headers: {
           'Content-Type': 'application/json',
@@ -1849,7 +1862,7 @@ class _HomePageState extends State<HomePage> {
     try {
       final cc = _leaveCcCtrl.text.trim();
       final fullReason = cc.isEmpty ? reason : '$reason\nCC: $cc';
-      final resp = await http.post(
+      final resp = await healonHttpClient.post(
         Uri.parse('$backendUrl/api/employee/leaves/'),
         headers: {
           'Content-Type': 'application/json',
@@ -1909,7 +1922,7 @@ class _HomePageState extends State<HomePage> {
 
     setState(() => _isRegularizationSubmitting = true);
     try {
-      final resp = await http.post(
+      final resp = await healonHttpClient.post(
         Uri.parse('$backendUrl/api/attendance-regularizations/'),
         headers: {
           'Content-Type': 'application/json',
@@ -2092,7 +2105,7 @@ class _HomePageState extends State<HomePage> {
   Future<Map<String, dynamic>?> _fetchSelectedPayslip() async {
     if (_token == null) return null;
     final month = _monthNumber(_selectedPayslipMonth);
-    final resp = await http.get(
+    final resp = await healonHttpClient.get(
       Uri.parse(
         '$backendUrl/api/employee/salary/?month=$month&year=$_selectedPayslipYear',
       ),
@@ -2194,7 +2207,7 @@ class _HomePageState extends State<HomePage> {
     setState(() => _isPayslipLoading = true);
     try {
       final month = _monthNumber(_selectedPayslipMonth);
-      final resp = await http.get(
+      final resp = await healonHttpClient.get(
         Uri.parse(
           '$backendUrl/api/employee/salary/payslip/?month=$month&year=$_selectedPayslipYear',
         ),
@@ -2322,7 +2335,7 @@ class _HomePageState extends State<HomePage> {
     if (_token == null) return;
     setState(() => _isReimbursementLoading = true);
     try {
-      final resp = await http.get(
+      final resp = await healonHttpClient.get(
         Uri.parse(
           '$backendUrl/api/employee/reimbursements/?date=${_dateQuery(_selectedReimbursementDate)}',
         ),
@@ -2361,7 +2374,7 @@ class _HomePageState extends State<HomePage> {
 
     setState(() => _isReimbursementLoading = true);
     try {
-      final resp = await http.post(
+      final resp = await healonHttpClient.post(
         Uri.parse('$backendUrl/api/employee/reimbursements/'),
         headers: {
           'Content-Type': 'application/json',
@@ -2399,7 +2412,7 @@ class _HomePageState extends State<HomePage> {
     if (_token == null) return;
     setState(() => _isAdminReimbursementLoading = true);
     try {
-      final resp = await http.get(
+      final resp = await healonHttpClient.get(
         Uri.parse(
           '$backendUrl/api/admin/reimbursements/?date=${_dateQuery(_selectedAdminReimbursementDate)}',
         ),
@@ -2433,7 +2446,7 @@ class _HomePageState extends State<HomePage> {
       final query = StringBuffer(
         '?month=${_monthNumber(_selectedPayrollMonth)}&year=$_selectedPayrollYear',
       );
-      final resp = await http.get(
+      final resp = await healonHttpClient.get(
         Uri.parse('$backendUrl/api/admin/salary-records/$query'),
         headers: {'Authorization': 'Token $_token'},
       );
@@ -2499,7 +2512,7 @@ class _HomePageState extends State<HomePage> {
               'incentives': _salaryIncentivesCtrl.text.trim(),
               'is_published': true,
             };
-      final resp = await http.post(
+      final resp = await healonHttpClient.post(
         Uri.parse('$backendUrl/api/admin/salary-records/'),
         headers: {
           'Content-Type': 'application/json',
@@ -2646,7 +2659,7 @@ class _HomePageState extends State<HomePage> {
 
     setState(() => _isEmployeeSaving = true);
     try {
-      final resp = await http.post(
+      final resp = await healonHttpClient.post(
         Uri.parse('$backendUrl/api/admin/employees/'),
         headers: {
           'Content-Type': 'application/json',
@@ -2856,7 +2869,7 @@ class _HomePageState extends State<HomePage> {
         body['password'] = password;
       }
 
-      final resp = await http.patch(
+      final resp = await healonHttpClient.patch(
         Uri.parse('$backendUrl/api/admin/employees/$employeeId/'),
         headers: {
           'Content-Type': 'application/json',
@@ -2921,7 +2934,7 @@ class _HomePageState extends State<HomePage> {
   Future<void> _deleteEmployee(int employeeId) async {
     setState(() => _isEmployeeSaving = true);
     try {
-      final resp = await http.delete(
+      final resp = await healonHttpClient.delete(
         Uri.parse('$backendUrl/api/admin/employees/$employeeId/'),
         headers: {if (_token != null) 'Authorization': 'Token $_token'},
       );
@@ -2979,7 +2992,7 @@ class _HomePageState extends State<HomePage> {
 
     setState(() => _isTaskSubmitting = true);
     try {
-      final resp = await http.post(
+      final resp = await healonHttpClient.post(
         Uri.parse('$backendUrl/api/employee/tasks/'),
         headers: {
           'Content-Type': 'application/json',
@@ -3024,7 +3037,7 @@ class _HomePageState extends State<HomePage> {
     }
 
     try {
-      final resp = await http.post(
+      final resp = await healonHttpClient.post(
         Uri.parse('$backendUrl$path'),
         headers: {
           'Content-Type': 'application/json',
@@ -3244,7 +3257,7 @@ class _HomePageState extends State<HomePage> {
         'format': 'jsonv2',
         'limit': '1',
       });
-      final response = await http.get(uri);
+      final response = await healonHttpClient.get(uri);
       if (response.statusCode != 200) {
         _showNotification('Location search failed', isError: true);
         return;
@@ -3331,7 +3344,7 @@ class _HomePageState extends State<HomePage> {
         'zoom': '18',
         'addressdetails': '1',
       });
-      final response = await http.get(uri);
+      final response = await healonHttpClient.get(uri);
       if (!mounted || requestId != _locationReverseGeocodeRequestId) return;
       if (response.statusCode != 200) return;
       final data = jsonDecode(response.body);
@@ -3456,7 +3469,7 @@ class _HomePageState extends State<HomePage> {
 
     setState(() => _isLocationSaving = true);
     try {
-      final resp = await http.patch(
+      final resp = await healonHttpClient.patch(
         Uri.parse('$backendUrl/api/admin/employees/$employeeId/location/'),
         headers: {
           'Content-Type': 'application/json',
@@ -3523,7 +3536,7 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
-    final resp = await http.post(
+    final resp = await healonHttpClient.post(
       Uri.parse('$backendUrl/api/checkin/'),
       headers: {
         'Content-Type': 'application/json',
@@ -3559,9 +3572,19 @@ class _HomePageState extends State<HomePage> {
   String _attendanceFailureMessage(String actionLabel, http.Response resp) {
     final body = _responseBodyMap(resp.body);
     final detail = body?['detail']?.toString() ?? _responseDetail(resp.body);
-    if (detail == 'Face not matched' &&
-        body?['face_recognition_enabled'] == true) {
-      return 'Face not matched';
+    if (body?['face_recognition_enabled'] == true ||
+        body?['face_verification_required'] == true) {
+      final match = body?['face_match_details'];
+      if (match is Map<String, dynamic>) {
+        final message = match['message']?.toString();
+        if (message != null && message.isNotEmpty) {
+          return '$actionLabel failed: $message';
+        }
+      }
+      if (detail.toLowerCase().contains('face not matched') ||
+          detail.toLowerCase().contains('verification photo')) {
+        return '$actionLabel failed: $detail';
+      }
     }
     return '$actionLabel failed: $detail';
   }
@@ -3633,7 +3656,7 @@ class _HomePageState extends State<HomePage> {
     });
 
     try {
-      final resp = await http.get(
+      final resp = await healonHttpClient.get(
         Uri.parse(
           '$backendUrl/api/attendance-report/?month=${_formatMonth(_selectedReportMonth)}',
         ),
@@ -3681,7 +3704,7 @@ class _HomePageState extends State<HomePage> {
       '$backendUrl/api/admin/attendance/',
     ).replace(queryParameters: params);
     try {
-      final resp = await http.get(
+      final resp = await healonHttpClient.get(
         uri,
         headers: {'Authorization': 'Token $_token'},
       );
@@ -3713,7 +3736,7 @@ class _HomePageState extends State<HomePage> {
       '$backendUrl/api/admin/attendance/',
     ).replace(queryParameters: params);
     try {
-      final resp = await http.get(
+      final resp = await healonHttpClient.get(
         uri,
         headers: {'Authorization': 'Token $_token'},
       );
@@ -3761,7 +3784,7 @@ class _HomePageState extends State<HomePage> {
           final uri = Uri.parse(
             '$backendUrl/api/admin/attendance/',
           ).replace(queryParameters: params);
-          final resp = await http.get(
+          final resp = await healonHttpClient.get(
             uri,
             headers: {'Authorization': 'Token $_token'},
           );
@@ -3827,7 +3850,7 @@ class _HomePageState extends State<HomePage> {
       '$backendUrl/api/admin/tasks/',
     ).replace(queryParameters: params);
     try {
-      final resp = await http.get(
+      final resp = await healonHttpClient.get(
         uri,
         headers: {'Authorization': 'Token $_token'},
       );
@@ -3882,6 +3905,9 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _selectMenu(String menuKey) {
+    if (menuKey != 'Notifications') {
+      _stopHrNotificationPolling();
+    }
     setState(() {
       _selectedMenu = menuKey;
       _expandedSidebarMenu = menuKey;
@@ -3929,6 +3955,11 @@ class _HomePageState extends State<HomePage> {
       } else if (menuKey == 'Notifications') {
         _selectedHrSection = 'Notifications';
         _selectedHrDashboardDetail = '';
+        _hrNotificationPage = 0;
+        _startHrNotificationPolling();
+        if (_isHrRole) {
+          _loadAdminSalaryRecords();
+        }
       } else if (menuKey == 'Attendance Management') {
         _selectedHrSection = 'Daily Attendance';
       } else if (menuKey == 'Recruitment') {
@@ -4320,63 +4351,59 @@ class _HomePageState extends State<HomePage> {
           ? _buildLoggedInView()
           : Stack(
               children: [
-                Row(
-                  children: [
-                    // Left Side - Branding
-                    Expanded(
-                      flex: 1,
-                      child: Container(
-                        color: Colors.grey[200],
-                        padding: const EdgeInsets.all(48),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'HealOn',
-                              style: Theme.of(context).textTheme.displayLarge
-                                  ?.copyWith(
-                                    color: const Color(0xFF1ABE8E),
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                            ),
-                            Text(
-                              'Attendance',
-                              style: Theme.of(context).textTheme.displayLarge
-                                  ?.copyWith(
-                                    color: const Color(0xFF1ABE8E),
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                            ),
-                            const SizedBox(height: 48),
-                            Text(
-                              '"Excellence in care begins the moment you arrive. Welcome back."',
-                              style: Theme.of(context).textTheme.bodyLarge
-                                  ?.copyWith(
-                                    color: const Color(0xFF1ABE8E),
-                                    fontStyle: FontStyle.italic,
-                                  ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    // Right Side - Login Form
-                    Expanded(
-                      flex: 1,
-                      child: Container(
-                        color: const Color(0xFF1ABE8E),
-                        padding: const EdgeInsets.all(48),
-                        child: LayoutBuilder(
-                          builder: (context, constraints) {
-                            return SingleChildScrollView(
-                              child: ConstrainedBox(
-                                constraints: BoxConstraints(
-                                  minHeight: constraints.maxHeight,
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final stackVertically = constraints.maxWidth < 960;
+                    final branding = Container(
+                      color: Colors.grey[200],
+                      padding: EdgeInsets.all(stackVertically ? 28 : 48),
+                      width: stackVertically ? double.infinity : null,
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'HealOn',
+                            style: Theme.of(context).textTheme.displayLarge
+                                ?.copyWith(
+                                  color: const Color(0xFF1ABE8E),
+                                  fontWeight: FontWeight.bold,
                                 ),
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
+                          ),
+                          Text(
+                            'Attendance',
+                            style: Theme.of(context).textTheme.displayLarge
+                                ?.copyWith(
+                                  color: const Color(0xFF1ABE8E),
+                                  fontWeight: FontWeight.bold,
+                                ),
+                          ),
+                          const SizedBox(height: 48),
+                          Text(
+                            '"Excellence in care begins the moment you arrive. Welcome back."',
+                            style: Theme.of(context).textTheme.bodyLarge
+                                ?.copyWith(
+                                  color: const Color(0xFF1ABE8E),
+                                  fontStyle: FontStyle.italic,
+                                ),
+                          ),
+                        ],
+                      ),
+                    );
+                    final loginForm = Container(
+                      color: const Color(0xFF1ABE8E),
+                      padding: EdgeInsets.all(stackVertically ? 28 : 48),
+                      width: stackVertically ? double.infinity : null,
+                      child: LayoutBuilder(
+                        builder: (context, formConstraints) {
+                          return SingleChildScrollView(
+                            child: ConstrainedBox(
+                              constraints: BoxConstraints(
+                                minHeight: formConstraints.maxHeight,
+                              ),
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
                                     // Avatar
                                     Container(
                                       width: 100,
@@ -4676,9 +4703,23 @@ class _HomePageState extends State<HomePage> {
                             );
                           },
                         ),
-                      ),
-                    ),
-                  ],
+                      );
+                    if (stackVertically) {
+                      return SingleChildScrollView(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [branding, loginForm],
+                        ),
+                      );
+                    }
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Expanded(child: branding),
+                        Expanded(child: loginForm),
+                      ],
+                    );
+                  },
                 ),
                 _buildLoginHelpdesk(),
               ],
@@ -5019,10 +5060,13 @@ class _HomePageState extends State<HomePage> {
                                 ),
                               ),
                               const SizedBox(height: 6),
-                              _buildStatusPill(
-                                '$_roleLabel Panel',
-                                color: _brandTeal,
-                                compact: true,
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: _buildStatusPill(
+                                  '$_roleLabel Panel',
+                                  color: _brandTeal,
+                                  compact: true,
+                                ),
                               ),
                             ],
                           ),
@@ -5319,14 +5363,10 @@ class _HomePageState extends State<HomePage> {
                             ),
                           ]),
                           _buildMenuItem(
-                            'Leaves',
-                            Icons.calendar_today,
-                            'Leaves',
-                          ),
-                          _buildMenuItem(
                             'Notifications',
                             Icons.notifications_active_outlined,
                             'Notifications',
+                            badgeCount: _hrUnreadNotificationCount(),
                           ),
                           _buildSubMenuGroup('Notifications', [
                             _buildSubMenuItem(
@@ -5859,25 +5899,24 @@ class _HomePageState extends State<HomePage> {
                                 ),
                                 const SizedBox(height: 24),
                                 // Main Content Row
-                                Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    // Left - Upcoming Holidays
-                                    Expanded(
-                                      flex: 2,
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Row(
-                                            children: [
-                                              const Icon(
-                                                Icons.calendar_month,
-                                                size: 24,
-                                                color: Colors.red,
-                                              ),
-                                              const SizedBox(width: 8),
-                                              Text(
+                                LayoutBuilder(
+                                  builder: (context, rowConstraints) {
+                                    final stackDashboard =
+                                        rowConstraints.maxWidth < 900;
+                                    final holidaysSection = Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            const Icon(
+                                              Icons.calendar_month,
+                                              size: 24,
+                                              color: Colors.red,
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: Text(
                                                 'Upcoming Holidays',
                                                 style: Theme.of(context)
                                                     .textTheme
@@ -5887,41 +5926,62 @@ class _HomePageState extends State<HomePage> {
                                                           FontWeight.bold,
                                                     ),
                                               ),
-                                            ],
-                                          ),
-                                          const SizedBox(height: 16),
-                                          ..._dashboardHolidayRows().map(
-                                            (holiday) => _buildHolidayCard(
-                                              holiday['name']!,
-                                              holiday['date']!,
                                             ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 16),
+                                        ..._dashboardHolidayRows().map(
+                                          (holiday) => _buildHolidayCard(
+                                            holiday['name']!,
+                                            holiday['date']!,
                                           ),
-                                        ],
-                                      ),
-                                    ),
-                                    const SizedBox(width: 32),
-                                    // Right - Cards
-                                    Expanded(
-                                      flex: 1,
-                                      child: Column(
+                                        ),
+                                      ],
+                                    );
+                                    final cardsSection = Column(
+                                      children: [
+                                        _buildDashboardCard(
+                                          'Work Assigned',
+                                          '${_readInt(_userSection('tasks'), 'assigned')} Pending Tasks',
+                                          Icons.work_outline,
+                                          const Color(0xFF2B5AF0),
+                                        ),
+                                        const SizedBox(height: 24),
+                                        _buildDashboardCard(
+                                          'Review Tasks',
+                                          '${_readInt(_userSection('tasks'), 'review_pending')} Reviews Pending',
+                                          Icons.assignment_turned_in,
+                                          Colors.orange,
+                                        ),
+                                      ],
+                                    );
+                                    if (stackDashboard) {
+                                      return Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.stretch,
                                         children: [
-                                          _buildDashboardCard(
-                                            'Work Assigned',
-                                            '${_readInt(_userSection('tasks'), 'assigned')} Pending Tasks',
-                                            Icons.work_outline,
-                                            const Color(0xFF2B5AF0),
-                                          ),
+                                          holidaysSection,
                                           const SizedBox(height: 24),
-                                          _buildDashboardCard(
-                                            'Review Tasks',
-                                            '${_readInt(_userSection('tasks'), 'review_pending')} Reviews Pending',
-                                            Icons.assignment_turned_in,
-                                            Colors.orange,
-                                          ),
+                                          cardsSection,
                                         ],
-                                      ),
-                                    ),
-                                  ],
+                                      );
+                                    }
+                                    return Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Expanded(
+                                          flex: 2,
+                                          child: holidaysSection,
+                                        ),
+                                        const SizedBox(width: 32),
+                                        Expanded(
+                                          flex: 1,
+                                          child: cardsSection,
+                                        ),
+                                      ],
+                                    );
+                                  },
                                 ),
 
                                 // Status Message
@@ -9443,12 +9503,19 @@ class _HomePageState extends State<HomePage> {
                 children: [
                   Expanded(
                     child: DropdownButtonFormField<String>(
+                      isExpanded: true,
                       initialValue: _selectedPayslipMonth,
-                      decoration: _salaryInputDecoration(label: 'Month'),
+                      decoration: _salaryInputDecoration(
+                        label: 'Month',
+                        compact: true,
+                      ),
                       items: months.map((month) {
                         return DropdownMenuItem(
                           value: month,
-                          child: Text(month),
+                          child: Text(
+                            month,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         );
                       }).toList(),
                       onChanged: (value) {
@@ -9849,7 +9916,11 @@ class _HomePageState extends State<HomePage> {
           'Bonus & Incentives',
         ])
           ChoiceChip(
-            label: Text(section),
+            label: Text(
+              section,
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
+            ),
             selected: _selectedHrPayrollSection == section,
             onSelected: (_) => _selectHrPayrollSection(section),
           ),
@@ -10059,13 +10130,17 @@ class _HomePageState extends State<HomePage> {
         SizedBox(
           width: 180,
           child: DropdownButtonFormField<String>(
+            isExpanded: true,
             initialValue: _selectedPayrollMonth,
-            decoration: _salaryInputDecoration(label: 'Month'),
+            decoration: _salaryInputDecoration(label: 'Month', compact: true),
             items: [
               for (var i = 1; i <= 12; i++)
                 DropdownMenuItem(
                   value: _monthName(i),
-                  child: Text(_monthName(i)),
+                  child: Text(
+                    _monthName(i),
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
             ],
             onChanged: (value) {
@@ -10078,11 +10153,15 @@ class _HomePageState extends State<HomePage> {
         SizedBox(
           width: 140,
           child: DropdownButtonFormField<String>(
+            isExpanded: true,
             initialValue: _selectedPayrollYear,
-            decoration: _salaryInputDecoration(label: 'Year'),
+            decoration: _salaryInputDecoration(label: 'Year', compact: true),
             items: List.generate(6, (index) {
               final year = (DateTime.now().year - 2 + index).toString();
-              return DropdownMenuItem(value: year, child: Text(year));
+              return DropdownMenuItem(
+                value: year,
+                child: Text(year, overflow: TextOverflow.ellipsis),
+              );
             }),
             onChanged: (value) {
               if (value == null) return;
@@ -10109,8 +10188,9 @@ class _HomePageState extends State<HomePage> {
     return SizedBox(
       width: 260,
       child: DropdownButtonFormField<int>(
+        isExpanded: true,
         initialValue: selectedId,
-        decoration: _salaryInputDecoration(label: label),
+        decoration: _salaryInputDecoration(label: label, compact: true),
         items: employees.map((employee) {
           final id = _employeeId(employee);
           return DropdownMenuItem<int>(
@@ -10131,11 +10211,11 @@ class _HomePageState extends State<HomePage> {
     TextEditingController controller,
   ) {
     return SizedBox(
-      width: 190,
+      width: 220,
       child: TextField(
         controller: controller,
         keyboardType: const TextInputType.numberWithOptions(decimal: true),
-        decoration: _salaryInputDecoration(label: label),
+        decoration: _salaryInputDecoration(label: label, compact: true),
       ),
     );
   }
@@ -10303,11 +10383,15 @@ class _HomePageState extends State<HomePage> {
                     child: Icon(icon, color: color),
                   ),
                   const SizedBox(width: 12),
-                  Text(
-                    title,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: const Color(0xFF1F2E5A),
-                      fontWeight: FontWeight.bold,
+                  Expanded(
+                    child: Text(
+                      title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: const Color(0xFF1F2E5A),
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ],
@@ -10380,16 +10464,22 @@ class _HomePageState extends State<HomePage> {
     String? label,
     String? hintText,
     Widget? suffixIcon,
+    bool compact = false,
   }) {
     return InputDecoration(
       labelText: label == null || label.isEmpty ? null : label,
       hintText: hintText,
-      prefixIcon: label == null ? null : Icon(_iconForField(label), size: 20),
+      prefixIcon: compact || label == null
+          ? null
+          : Icon(_iconForField(label), size: 20),
       suffixIcon: suffixIcon,
       isDense: true,
       filled: true,
       fillColor: Colors.white,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      contentPadding: EdgeInsets.symmetric(
+        horizontal: compact ? 12 : 14,
+        vertical: compact ? 12 : 14,
+      ),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
         borderSide: const BorderSide(color: _lineColor),
@@ -10796,31 +10886,809 @@ class _HomePageState extends State<HomePage> {
             ],
           ),
           const SizedBox(height: 24),
+          if (_hrNotificationItems().isNotEmpty) ...[
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Recent Notifications',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: _inkBlue,
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => _selectMenu('Notifications'),
+                  child: Text(
+                    _hrUnreadNotificationCount() > 0
+                        ? 'View all (${_hrUnreadNotificationCount()} unread)'
+                        : 'View all',
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            _buildHrNotificationPanel(
+              _hrNotificationItems()
+                  .where((item) => !_isHrNotificationRead(item))
+                  .followedBy(
+                    _hrNotificationItems().where(_isHrNotificationRead),
+                  )
+                  .take(4)
+                  .toList(),
+              totalCount: _hrNotificationItems().length,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  String _hrNotificationReadStorageKey() {
+    final username =
+        _currentUser?['username']?.toString() ?? _empIdCtrl.text.trim();
+    return 'hr_read_notifications_$username';
+  }
+
+  void _loadHrNotificationReadState() {
+    final raw = login_storage.readString(_hrNotificationReadStorageKey());
+    if (raw == null || raw.isEmpty) {
+      return;
+    }
+    _readHrNotificationIds
+      ..clear()
+      ..addAll(raw.split(',').where((entry) => entry.isNotEmpty));
+  }
+
+  void _saveHrNotificationReadState() {
+    login_storage.writeString(
+      _hrNotificationReadStorageKey(),
+      _readHrNotificationIds.join(','),
+    );
+  }
+
+  void _startHrNotificationPolling() {
+    if (!_isHrRole || _token == null) {
+      return;
+    }
+    _hrNotificationRefreshTimer?.cancel();
+    _hrNotificationRefreshTimer = Timer.periodic(
+      const Duration(seconds: 45),
+      (_) {
+        if (!mounted || _selectedMenu != 'Notifications' || _token == null) {
+          return;
+        }
+        loadDashboardData();
+      },
+    );
+  }
+
+  void _stopHrNotificationPolling() {
+    _hrNotificationRefreshTimer?.cancel();
+    _hrNotificationRefreshTimer = null;
+  }
+
+  bool _isHrNotificationRead(Map<String, dynamic> item) {
+    final id = item['notification_id']?.toString() ?? '';
+    return id.isNotEmpty && _readHrNotificationIds.contains(id);
+  }
+
+  void _markHrNotificationRead(String notificationId) {
+    if (notificationId.isEmpty) {
+      return;
+    }
+    setState(() => _readHrNotificationIds.add(notificationId));
+    _saveHrNotificationReadState();
+  }
+
+  void _markAllHrNotificationsRead() {
+    final ids = _hrNotificationItems()
+        .map((item) => item['notification_id']?.toString() ?? '')
+        .where((id) => id.isNotEmpty);
+    setState(() => _readHrNotificationIds.addAll(ids));
+    _saveHrNotificationReadState();
+  }
+
+  int _hrUnreadNotificationCount() {
+    return _hrNotificationItems()
+        .where((item) => !_isHrNotificationRead(item))
+        .length;
+  }
+
+  String _hrNotificationCategoryLabel(String kind) {
+    return switch (kind) {
+      'leave' => 'Leave Requests',
+      'regularization' => 'Attendance Regularization',
+      'ticket' => 'Helpdesk Tickets',
+      'reimbursement' => 'Payroll Updates',
+      'payroll' => 'Payroll Updates',
+      'announcement' => 'Announcements',
+      'system' => 'System Alerts',
+      'employee' => 'Employee Management',
+      _ => 'General',
+    };
+  }
+
+  IconData _hrNotificationCategoryIcon(String kind) {
+    return switch (kind) {
+      'leave' => Icons.event_note_outlined,
+      'regularization' => Icons.schedule_outlined,
+      'ticket' => Icons.support_agent_outlined,
+      'reimbursement' => Icons.receipt_long_outlined,
+      'payroll' => Icons.payments_outlined,
+      'announcement' => Icons.campaign_outlined,
+      'system' => Icons.warning_amber_outlined,
+      'employee' => Icons.groups_outlined,
+      _ => Icons.notifications_outlined,
+    };
+  }
+
+  Color _hrNotificationCategoryColor(String kind) {
+    return switch (kind) {
+      'leave' => Colors.teal,
+      'regularization' => const Color(0xFF2B5AF0),
+      'ticket' => Colors.purple,
+      'reimbursement' => Colors.orange,
+      'payroll' => const Color(0xFF1ABE8E),
+      'announcement' => _brandBlue,
+      'system' => Colors.red,
+      'employee' => const Color(0xFF1F2E5A),
+      _ => _mutedText,
+    };
+  }
+
+  String _hrNotificationTimestamp(Map<String, dynamic> item) {
+    return item['timestamp']?.toString() ??
+        item['created_at']?.toString() ??
+        item['from_date']?.toString() ??
+        item['date']?.toString() ??
+        item['submitted_at']?.toString() ??
+        _adminDashboard?['timestamp']?.toString() ??
+        DateTime.now().toIso8601String();
+  }
+
+  List<Map<String, dynamic>> _hrNotificationItems() {
+    if (!_isHrRole && !_isAdminRole) {
+      return [];
+    }
+    final pending =
+        _adminDashboard?['pending_requests'] as Map<String, dynamic>? ?? {};
+    final summary = _adminDashboard?['summary'] as Map<String, dynamic>? ?? {};
+    final dashboardTs =
+        _adminDashboard?['timestamp']?.toString() ??
+        DateTime.now().toIso8601String();
+    final items = <Map<String, dynamic>>[];
+
+    for (final item in _adminPendingWorkItems()) {
+      final kind = item['kind']?.toString() ?? '';
+      final id = (item['id'] as num?)?.toInt() ?? 0;
+      items.add({
+        ...item,
+        'notification_id': '$kind-$id',
+        'category': _hrNotificationCategoryLabel(kind),
+        'timestamp': _hrNotificationTimestamp(item),
+        'created_at_label': _readableDate(_hrNotificationTimestamp(item)),
+      });
+    }
+
+    final reimbursements = pending['reimbursements'] as List<dynamic>? ?? [];
+    for (final raw in reimbursements.whereType<Map<String, dynamic>>()) {
+      final id = (raw['id'] as num?)?.toInt() ?? 0;
+      final submittedAt =
+          raw['submitted_at']?.toString() ?? dashboardTs;
+      items.add({
+        'kind': 'reimbursement',
+        'id': id,
+        'notification_id': 'reimbursement-$id',
+        'type': 'Payroll Update',
+        'category': _hrNotificationCategoryLabel('reimbursement'),
+        'employee': raw['employee_name']?.toString() ?? '-',
+        'title': raw['reason']?.toString() ?? 'Reimbursement submission',
+        'meta':
+            'Expense date: ${_readableDate(raw['expense_date']?.toString() ?? '')}',
+        'status_value': 'pending',
+        'status': 'Pending Review',
+        'timestamp': submittedAt,
+        'created_at_label': _readableDate(submittedAt),
+        'file_name': raw['file_name']?.toString() ?? '',
+      });
+    }
+
+    for (final raw in _adminSalaryRecords.take(25)) {
+      final id = (raw['id'] as num?)?.toInt() ?? 0;
+      if (id == 0) {
+        continue;
+      }
+      final month = raw['month'];
+      final year = raw['year']?.toString() ?? '';
+      items.add({
+        'kind': 'payroll',
+        'id': id,
+        'notification_id': 'payroll-$id-$month-$year',
+        'type': 'Payroll Update',
+        'category': _hrNotificationCategoryLabel('payroll'),
+        'employee': raw['employee_name']?.toString() ?? '-',
+        'title': 'Salary structure for $month $year',
+        'meta':
+            'Net salary: ${_moneyLabel(raw['net_salary'])} | Bonus: ${_moneyLabel(raw['bonus'])}',
+        'status_value': 'published',
+        'status': 'Published',
+        'timestamp': dashboardTs,
+        'created_at_label': _readableDate(dashboardTs),
+      });
+    }
+
+    final totalEmployees = _readInt(summary, 'total_employees');
+    final presentToday = _readInt(summary, 'present_today');
+    final absentToday = _readInt(summary, 'absent_today');
+    if (totalEmployees > 0) {
+      items.add({
+        'kind': 'announcement',
+        'id': 1,
+        'notification_id': 'announcement-roster',
+        'type': 'Announcement',
+        'category': _hrNotificationCategoryLabel('announcement'),
+        'employee': 'HR Team',
+        'title': 'Daily workforce briefing',
+        'meta':
+            '$totalEmployees employees on roster. $presentToday present and $absentToday absent today.',
+        'status_value': 'info',
+        'status': 'Published',
+        'timestamp': dashboardTs,
+        'created_at_label': _readableDate(dashboardTs),
+      });
+    }
+
+    final pendingApprovals = _readInt(summary, 'pending_approvals');
+    if (pendingApprovals > 0) {
+      items.add({
+        'kind': 'system',
+        'id': pendingApprovals,
+        'notification_id': 'system-pending-approvals',
+        'type': 'System Alert',
+        'category': _hrNotificationCategoryLabel('system'),
+        'employee': 'System',
+        'title': '$pendingApprovals items need HR attention',
+        'meta':
+            'Includes leave requests, attendance regularizations, and helpdesk tickets.',
+        'status_value': 'alert',
+        'status': 'Action Required',
+        'timestamp': dashboardTs,
+        'created_at_label': _readableDate(dashboardTs),
+      });
+    }
+
+    return items;
+  }
+
+  List<Map<String, dynamic>> _filteredHrNotifications() {
+    final query = _hrNotificationSearchCtrl.text.trim().toLowerCase();
+    var items = _hrNotificationItems().where((item) {
+      if (_hrNotificationCategoryFilter != 'All' &&
+          item['category']?.toString() != _hrNotificationCategoryFilter) {
+        return false;
+      }
+      final statusValue =
+          (item['status_value']?.toString() ?? '').toLowerCase();
+      final isRead = _isHrNotificationRead(item);
+      if (_hrNotificationStatusFilter == 'Unread' && isRead) {
+        return false;
+      }
+      if (_hrNotificationStatusFilter == 'Read' && !isRead) {
+        return false;
+      }
+      if (_hrNotificationStatusFilter == 'Pending' &&
+          !{'pending', 'open', 'in_progress', 'alert'}.contains(statusValue)) {
+        return false;
+      }
+      if (_hrNotificationStatusFilter == 'Resolved' &&
+          !{'approved', 'resolved', 'published', 'info', 'rejected', 'closed'}
+              .contains(statusValue)) {
+        return false;
+      }
+      if (query.isEmpty) {
+        return true;
+      }
+      final haystack = [
+        item['type'],
+        item['employee'],
+        item['title'],
+        item['meta'],
+        item['category'],
+        item['status'],
+      ].map((value) => value?.toString().toLowerCase() ?? '').join(' ');
+      return haystack.contains(query);
+    }).toList();
+
+    items.sort((a, b) {
+      if (_hrNotificationSort == 'status') {
+        return (a['status']?.toString() ?? '').compareTo(
+          b['status']?.toString() ?? '',
+        );
+      }
+      final aTime = DateTime.tryParse(
+            _hrNotificationTimestamp(a),
+          ) ??
+          DateTime.fromMillisecondsSinceEpoch(0);
+      final bTime = DateTime.tryParse(
+            _hrNotificationTimestamp(b),
+          ) ??
+          DateTime.fromMillisecondsSinceEpoch(0);
+      return _hrNotificationSort == 'oldest'
+          ? aTime.compareTo(bTime)
+          : bTime.compareTo(aTime);
+    });
+    return items;
+  }
+
+  List<Map<String, dynamic>> _paginatedHrNotifications(
+    List<Map<String, dynamic>> items,
+  ) {
+    final start = _hrNotificationPage * _hrNotificationPageSize;
+    if (start >= items.length) {
+      return [];
+    }
+    final end = math.min(start + _hrNotificationPageSize, items.length);
+    return items.sublist(start, end);
+  }
+
+  bool _hrNotificationIsActionable(Map<String, dynamic> item) {
+    final kind = item['kind']?.toString() ?? '';
+    final status =
+        (item['status_value']?.toString() ?? '').toLowerCase();
+    if (kind == 'ticket') {
+      return status == 'open' || status == 'in_progress';
+    }
+    if (kind == 'leave' || kind == 'regularization') {
+      return status == 'pending';
+    }
+    return false;
+  }
+
+  void _navigateToHrNotification(Map<String, dynamic> item) {
+    final notificationId = item['notification_id']?.toString() ?? '';
+    _markHrNotificationRead(notificationId);
+    final kind = item['kind']?.toString() ?? '';
+    switch (kind) {
+      case 'leave':
+        setState(() {
+          _selectedMenu = 'Leaves';
+          _selectedHrSection = 'Leaves';
+          _selectedHrDashboardDetail = '';
+        });
+        break;
+      case 'regularization':
+        setState(() {
+          _selectedMenu = 'Attendance';
+          _selectedHrSection = 'Daily Attendance';
+          _selectedAdminAttendanceSection = 'Daily Attendances';
+        });
+        _loadAdminDailyAttendance();
+        break;
+      case 'ticket':
+        _selectMenu('Helpdesk');
+        break;
+      case 'reimbursement':
+        _selectHrPayrollSection('Reimbursement');
+        break;
+      case 'payroll':
+        _selectHrPayrollSection('Salary Structure');
+        break;
+      case 'employee':
+        setState(() {
+          _selectedMenu = 'Employee Management';
+          _selectedAttendanceSection = 'Edit Employee';
+          _selectedHrSection = 'Edit Employee';
+        });
+        break;
+      case 'announcement':
+      case 'system':
+      default:
+        setState(() {
+          _selectedMenu = 'Dashboard';
+          _selectedHrDashboardDetail = '';
+        });
+        break;
+    }
+  }
+
+  Future<void> _showHrNotificationDetailDialog(
+    Map<String, dynamic> item,
+  ) async {
+    final notificationId = item['notification_id']?.toString() ?? '';
+    _markHrNotificationRead(notificationId);
+    final kind = item['kind']?.toString() ?? '';
+    final id = (item['id'] as num?)?.toInt() ?? 0;
+    final isTicket = kind == 'ticket';
+    final actionable = _hrNotificationIsActionable(item);
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Row(
+            children: [
+              Icon(
+                _hrNotificationCategoryIcon(kind),
+                color: _hrNotificationCategoryColor(kind),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  item['type']?.toString() ?? 'Notification',
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          content: SizedBox(
+            width: 640,
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildNotificationDetailRow(
+                    'Category',
+                    item['category']?.toString() ?? '-',
+                  ),
+                  _buildNotificationDetailRow(
+                    'Employee',
+                    item['employee']?.toString() ?? '-',
+                  ),
+                  _buildNotificationDetailRow(
+                    'Summary',
+                    item['title']?.toString() ?? '-',
+                  ),
+                  _buildNotificationDetailRow(
+                    'Details',
+                    item['meta']?.toString() ?? '-',
+                  ),
+                  if (item['from_date'] != null)
+                    _buildNotificationDetailRow(
+                      'From',
+                      _readableDate(item['from_date']?.toString() ?? ''),
+                    ),
+                  if (item['to_date'] != null)
+                    _buildNotificationDetailRow(
+                      'To',
+                      _readableDate(item['to_date']?.toString() ?? ''),
+                    ),
+                  if (item['days'] != null)
+                    _buildNotificationDetailRow(
+                      'Days',
+                      item['days']?.toString() ?? '-',
+                    ),
+                  _buildNotificationDetailRow(
+                    'Date',
+                    item['created_at_label']?.toString() ?? '-',
+                  ),
+                  _buildNotificationDetailRow(
+                    'Status',
+                    item['status']?.toString() ?? '-',
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Close'),
+            ),
+            OutlinedButton.icon(
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+                _navigateToHrNotification(item);
+              },
+              icon: const Icon(Icons.open_in_new),
+              label: const Text('Open Module'),
+            ),
+            if (actionable && id != 0) ...[
+              FilledButton.icon(
+                onPressed: () async {
+                  Navigator.of(dialogContext).pop();
+                  await _updatePendingRequestStatus(
+                    kind,
+                    id,
+                    _statusValueForPendingAction(kind, 'approve'),
+                  );
+                },
+                icon: Icon(isTicket ? Icons.task_alt : Icons.check),
+                label: Text(isTicket ? 'Resolve' : 'Approve'),
+              ),
+              OutlinedButton.icon(
+                onPressed: () async {
+                  Navigator.of(dialogContext).pop();
+                  await _updatePendingRequestStatus(
+                    kind,
+                    id,
+                    _statusValueForPendingAction(kind, 'reject'),
+                  );
+                },
+                icon: Icon(isTicket ? Icons.close : Icons.close),
+                label: Text(isTicket ? 'Close Ticket' : 'Reject'),
+              ),
+            ],
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildNotificationDetailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 110,
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: _mutedText,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(
+                color: _inkBlue,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
         ],
       ),
     );
   }
 
   Widget _buildHrNotificationsView() {
-    final notifications = _adminPendingWorkItems().take(4).toList();
+    final allItems = _filteredHrNotifications();
+    final pageItems = _paginatedHrNotifications(allItems);
+    final totalPages = allItems.isEmpty
+        ? 1
+        : ((allItems.length - 1) ~/ _hrNotificationPageSize) + 1;
+    final unreadCount = _hrUnreadNotificationCount();
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(32),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildSectionHeader(
-            'Notifications',
-            'Review pending approvals, support updates, and workforce activity.',
+          Row(
+            children: [
+              Expanded(
+                child: _buildSectionHeader(
+                  'Notification Center',
+                  'Track leave, attendance, helpdesk, payroll, announcements, and system alerts in one place.',
+                ),
+              ),
+              if (unreadCount > 0)
+                Container(
+                  margin: const EdgeInsets.only(right: 12),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+                  ),
+                  child: Text(
+                    '$unreadCount unread',
+                    style: const TextStyle(
+                      color: Colors.orange,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              IconButton.filled(
+                tooltip: 'Refresh notifications',
+                onPressed: _isDashboardLoading ? null : refreshDashboardData,
+                style: IconButton.styleFrom(
+                  backgroundColor: const Color(0xFF2B5AF0),
+                  foregroundColor: Colors.white,
+                ),
+                icon: _isDashboardLoading
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(Icons.refresh),
+              ),
+            ],
           ),
-          const SizedBox(height: 24),
-          _buildHrNotificationPanel(notifications),
+          const SizedBox(height: 20),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              SizedBox(
+                width: 280,
+                child: TextField(
+                  controller: _hrNotificationSearchCtrl,
+                  decoration: InputDecoration(
+                    hintText: 'Search notifications',
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: _hrNotificationSearchCtrl.text.isEmpty
+                        ? null
+                        : IconButton(
+                            onPressed: () {
+                              _hrNotificationSearchCtrl.clear();
+                              setState(() => _hrNotificationPage = 0);
+                            },
+                            icon: const Icon(Icons.clear),
+                          ),
+                    border: const OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  onChanged: (_) => setState(() => _hrNotificationPage = 0),
+                ),
+              ),
+              SizedBox(
+                width: 220,
+                child: DropdownButtonFormField<String>(
+                  isExpanded: true,
+                  initialValue: _hrNotificationCategoryFilter,
+                  decoration: const InputDecoration(
+                    labelText: 'Category',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 'All', child: Text('All')),
+                    DropdownMenuItem(
+                      value: 'Leave Requests',
+                      child: Text('Leave Requests'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'Attendance Regularization',
+                      child: Text('Attendance Regularization'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'Helpdesk Tickets',
+                      child: Text('Helpdesk Tickets'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'Payroll Updates',
+                      child: Text('Payroll Updates'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'Announcements',
+                      child: Text('Announcements'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'System Alerts',
+                      child: Text('System Alerts'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'Employee Management',
+                      child: Text('Employee Management'),
+                    ),
+                  ],
+                  onChanged: (value) {
+                    if (value == null) {
+                      return;
+                    }
+                    setState(() {
+                      _hrNotificationCategoryFilter = value;
+                      _hrNotificationPage = 0;
+                    });
+                  },
+                ),
+              ),
+              SizedBox(
+                width: 170,
+                child: DropdownButtonFormField<String>(
+                  isExpanded: true,
+                  initialValue: _hrNotificationStatusFilter,
+                  decoration: const InputDecoration(
+                    labelText: 'Status',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 'All', child: Text('All')),
+                    DropdownMenuItem(value: 'Unread', child: Text('Unread')),
+                    DropdownMenuItem(value: 'Read', child: Text('Read')),
+                    DropdownMenuItem(value: 'Pending', child: Text('Pending')),
+                    DropdownMenuItem(value: 'Resolved', child: Text('Resolved')),
+                  ],
+                  onChanged: (value) {
+                    if (value == null) {
+                      return;
+                    }
+                    setState(() {
+                      _hrNotificationStatusFilter = value;
+                      _hrNotificationPage = 0;
+                    });
+                  },
+                ),
+              ),
+              SizedBox(
+                width: 170,
+                child: DropdownButtonFormField<String>(
+                  isExpanded: true,
+                  initialValue: _hrNotificationSort,
+                  decoration: const InputDecoration(
+                    labelText: 'Sort',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 'newest', child: Text('Newest first')),
+                    DropdownMenuItem(value: 'oldest', child: Text('Oldest first')),
+                    DropdownMenuItem(value: 'status', child: Text('By status')),
+                  ],
+                  onChanged: (value) {
+                    if (value == null) {
+                      return;
+                    }
+                    setState(() {
+                      _hrNotificationSort = value;
+                      _hrNotificationPage = 0;
+                    });
+                  },
+                ),
+              ),
+              TextButton.icon(
+                onPressed:
+                    unreadCount == 0 ? null : _markAllHrNotificationsRead,
+                icon: const Icon(Icons.done_all),
+                label: const Text('Mark all read'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          _buildHrNotificationPanel(pageItems, totalCount: allItems.length),
+          if (allItems.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Page ${_hrNotificationPage + 1} of $totalPages (${allItems.length} total)',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: _mutedText,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                Row(
+                  children: [
+                    OutlinedButton(
+                      onPressed: _hrNotificationPage == 0
+                          ? null
+                          : () => setState(() => _hrNotificationPage -= 1),
+                      child: const Text('Previous'),
+                    ),
+                    const SizedBox(width: 10),
+                    OutlinedButton(
+                      onPressed: _hrNotificationPage >= totalPages - 1
+                          ? null
+                          : () => setState(() => _hrNotificationPage += 1),
+                      child: const Text('Next'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
   }
 
-  Widget _buildHrNotificationPanel(List<Map<String, dynamic>> notifications) {
+  Widget _buildHrNotificationPanel(
+    List<Map<String, dynamic>> notifications, {
+    required int totalCount,
+  }) {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -10849,62 +11717,142 @@ class _HomePageState extends State<HomePage> {
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
-                  'Notifications',
+                  'HR Notifications',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     color: _inkBlue,
                     fontWeight: FontWeight.w900,
                   ),
                 ),
               ),
+              Text(
+                '$totalCount in history',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: _mutedText,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 16),
           if (notifications.isEmpty)
-            Text(
-              'No notifications available.',
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(color: const Color(0xFF64748B)),
+            _buildReportMessage(
+              icon: Icons.notifications_none_outlined,
+              title: 'No notifications match your filters',
+              message:
+                  'Try another category, status, or search term. New HR activity will appear here automatically.',
+              actionLabel: 'Refresh',
+              onAction: loadDashboardData,
             )
           else
             ...notifications.map((item) {
-              return Container(
-                margin: const EdgeInsets.only(bottom: 10),
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF8FAFC),
+              final kind = item['kind']?.toString() ?? '';
+              final isRead = _isHrNotificationRead(item);
+              return Material(
+                color: Colors.transparent,
+                child: InkWell(
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: _lineColor),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.circle, size: 8, color: Color(0xFF2B5AF0)),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            item['type']?.toString() ?? 'Notification',
-                            style: Theme.of(context).textTheme.bodyMedium
-                                ?.copyWith(
-                                  color: _inkBlue,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                          ),
-                          const SizedBox(height: 3),
-                          Text(
-                            '${item['employee'] ?? '-'} - ${item['title'] ?? '-'}',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(color: const Color(0xFF64748B)),
-                          ),
-                        ],
+                  onTap: () => _showHrNotificationDetailDialog(item),
+                  child: Container(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: isRead
+                          ? const Color(0xFFF8FAFC)
+                          : _lightCyan.withValues(alpha: 0.45),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isRead
+                            ? _lineColor
+                            : _brandTeal.withValues(alpha: 0.35),
                       ),
                     ),
-                    _buildStatusPill(item['status']?.toString() ?? 'Pending'),
-                  ],
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            color: _hrNotificationCategoryColor(kind)
+                                .withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Icon(
+                            _hrNotificationCategoryIcon(kind),
+                            color: _hrNotificationCategoryColor(kind),
+                            size: 18,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      item['type']?.toString() ??
+                                          'Notification',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodyMedium
+                                          ?.copyWith(
+                                            color: _inkBlue,
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                    ),
+                                  ),
+                                  if (!isRead)
+                                    Container(
+                                      width: 8,
+                                      height: 8,
+                                      decoration: const BoxDecoration(
+                                        color: Color(0xFF2B5AF0),
+                                        shape: BoxShape.circle,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                '${item['employee'] ?? '-'} - ${item['title'] ?? '-'}',
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(color: const Color(0xFF64748B)),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                '${item['category'] ?? '-'} • ${item['created_at_label'] ?? '-'}',
+                                style: Theme.of(context).textTheme.labelSmall
+                                    ?.copyWith(
+                                      color: _mutedText,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Column(
+                          children: [
+                            _buildStatusPill(
+                              item['status']?.toString() ?? 'Pending',
+                              compact: true,
+                            ),
+                            const SizedBox(height: 8),
+                            IconButton(
+                              tooltip: 'Open related module',
+                              visualDensity: VisualDensity.compact,
+                              onPressed: () => _navigateToHrNotification(item),
+                              icon: const Icon(Icons.arrow_forward),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               );
             }),
@@ -11965,6 +12913,9 @@ class _HomePageState extends State<HomePage> {
       ),
       child: Text(
         status,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        softWrap: false,
         style: TextStyle(
           color: pillColor,
           fontWeight: FontWeight.w800,
@@ -17410,7 +18361,12 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildMenuItem(String label, IconData icon, String menuKey) {
+  Widget _buildMenuItem(
+    String label,
+    IconData icon,
+    String menuKey, {
+    int badgeCount = 0,
+  }) {
     final hasSubmenus = _sidebarMenuHasSubmenus(menuKey);
     final isExpanded = _expandedSidebarMenu == menuKey;
     final isActive = !hasSubmenus && _selectedMenu == menuKey;
@@ -17505,6 +18461,27 @@ class _HomePageState extends State<HomePage> {
                       ),
                     ),
                   ),
+                  if (badgeCount > 0) ...[
+                    Container(
+                      margin: const EdgeInsets.only(right: 6),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.orange,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        badgeCount > 99 ? '99+' : '$badgeCount',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ],
                   if (hasSubmenus)
                     AnimatedRotation(
                       turns: isExpanded ? 0.5 : 0,
@@ -17664,14 +18641,18 @@ class _HomePageState extends State<HomePage> {
         boxShadow: _softShadow(0.04),
       ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            name,
-            style: Theme.of(
-              context,
-            ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+          Expanded(
+            child: Text(
+              name,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+            ),
           ),
+          const SizedBox(width: 12),
           Text(
             date,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(

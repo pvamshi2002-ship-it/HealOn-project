@@ -3,11 +3,13 @@ from django.db import models
 
 
 DEFAULT_ATTENDANCE_RADIUS_METERS = 100
+DEFAULT_FACE_MATCH_THRESHOLD = 0.86
 
 
 class AttendanceSettings(models.Model):
     name = models.CharField(max_length=80, default='Default attendance settings', unique=True)
     face_recognition_enabled = models.BooleanField(default=False)
+    face_match_threshold = models.FloatField(default=DEFAULT_FACE_MATCH_THRESHOLD)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

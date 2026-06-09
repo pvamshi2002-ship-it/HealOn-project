@@ -71,8 +71,14 @@ MAX_ATTENDANCE_LOCATION_AGE_SECONDS = 120
 MAX_ATTENDANCE_LOCATION_FUTURE_SECONDS = 30
 
 
+def get_user_profile(user):
+    if hasattr(user, 'userprofile'):
+        return user.userprofile
+    return None
+
+
 def role_for_user(user):
-    profile = getattr(user, 'userprofile', None)
+    profile = get_user_profile(user)
     role_markers = [
         user.username,
         user.email,
@@ -95,23 +101,28 @@ def role_for_user(user):
 
 
 def dashboard_permissions_for_user(user):
-    profile = getattr(user, 'userprofile', None)
+    profile = get_user_profile(user)
+    role_markers = [
+        user.username,
+        user.email,
+        profile.department if profile else '',
+        profile.designation if profile else '',
+    ]
+    has_hr_marker = any('hr' in (marker or '').lower() for marker in role_markers)
+
     if not profile:
-        return ['Admin'] if user.is_staff else ['User']
+        if user.is_staff:
+            return ['Admin']
+        if has_hr_marker:
+            return ['HR', 'User']
+        return ['User']
+
     permissions = []
     if profile.can_access_user_dashboard:
         permissions.append('User')
     if profile.can_access_admin_dashboard or user.is_staff:
         permissions.append('Admin')
-    role_markers = [
-        user.username,
-        user.email,
-        profile.department,
-        profile.designation,
-    ]
-    if profile.can_access_hr_dashboard or any(
-        'hr' in (marker or '').lower() for marker in role_markers
-    ):
+    if profile.can_access_hr_dashboard or has_hr_marker:
         permissions.append('HR')
     return permissions or [role_for_user(user)]
 
@@ -339,29 +350,149 @@ def photo_similarity_score(profile_photo, captured_photo):
     return max(0, min(1, (correlation + 1) / 2))
 
 
-def face_match_details(profile_photo, captured_photo):
+def face_match_threshold_value(settings_obj=None):
+    settings_obj = settings_obj or AttendanceSettings.current()
+    threshold = getattr(settings_obj, 'face_match_threshold', None)
+    if threshold is None:
+        return AttendanceSettings.DEFAULT_FACE_MATCH_THRESHOLD
+    return max(0.0, min(1.0, float(threshold)))
+
+
+def face_match_details(profile_photo, captured_photo, threshold=None):
+    settings_obj = AttendanceSettings.current()
+    threshold = (
+        face_match_threshold_value(settings_obj)
+        if threshold is None
+        else max(0.0, min(1.0, float(threshold)))
+    )
     profile_hash = photo_biometric_hash(profile_photo)
     captured_hash = photo_biometric_hash(captured_photo)
     exact_match = bool(profile_hash and captured_hash and profile_hash == captured_hash)
     similarity_score = photo_similarity_score(profile_photo, captured_photo)
     matched = exact_match or (
-        similarity_score is not None and similarity_score >= 0.86
+        similarity_score is not None and similarity_score >= threshold
     )
     if similarity_score is None and not exact_match:
         message = (
-            'Face verification requires PNG camera captures. Recapture the '
-            'employee registered photo and try again.'
+            'Face verification requires PNG camera captures. Recapture using the '
+            'employee registered verification photo and try again.'
         )
     elif matched:
         message = 'Face matched'
     else:
-        message = 'Face not matched'
+        score_label = f'{similarity_score:.0%}' if similarity_score is not None else 'N/A'
+        threshold_label = f'{threshold:.0%}'
+        message = (
+            f'Face not matched. Similarity score {score_label} is below the '
+            f'required {threshold_label} threshold.'
+        )
     return {
         'enabled': True,
         'matched': matched,
         'message': message,
         'similarity_score': similarity_score,
+        'required_threshold': threshold,
+        'exact_match': exact_match,
     }
+
+
+def log_face_verification_attempt(
+    user,
+    event_type,
+    *,
+    enabled,
+    matched=None,
+    similarity_score=None,
+    threshold=None,
+    reason='',
+):
+    username = getattr(user, 'username', 'unknown')
+    if not enabled:
+        logger.info(
+            'Face verification skipped (disabled) user=%s event=%s',
+            username,
+            event_type,
+        )
+        return
+    logger.info(
+        'Face verification user=%s event=%s matched=%s score=%s threshold=%s reason=%s',
+        username,
+        event_type,
+        matched,
+        similarity_score,
+        threshold,
+        reason or 'ok',
+    )
+
+
+def verify_attendance_face_match(user, profile_photo, captured_photo, event_type):
+    """Compare attendance photo to registered verification photo when enabled."""
+    assigned_location = getattr(user, 'assigned_location', None)
+    face_recognition_enabled = face_verification_required_for(assigned_location)
+    face_settings = face_verification_settings_payload(assigned_location)
+    threshold = face_match_threshold_value()
+
+    if not face_recognition_enabled:
+        face_details = {
+            'enabled': False,
+            'matched': None,
+            'message': 'Face recognition disabled',
+            'similarity_score': None,
+            'required_threshold': threshold,
+            'exact_match': False,
+        }
+        log_face_verification_attempt(
+            user,
+            event_type,
+            enabled=False,
+        )
+        return face_recognition_enabled, face_settings, face_details, ''
+
+    _, profile_photo_error = validate_photo_biometric(
+        profile_photo,
+        'Registered employee verification photo',
+    )
+    if profile_photo_error:
+        log_face_verification_attempt(
+            user,
+            event_type,
+            enabled=True,
+            matched=False,
+            threshold=threshold,
+            reason='missing_registered_photo',
+        )
+        return (
+            face_recognition_enabled,
+            face_settings,
+            None,
+            (
+                'Registered employee verification photo is required before '
+                'check-in or check-out. Please contact admin.'
+            ),
+        )
+
+    face_details = face_match_details(profile_photo, captured_photo, threshold=threshold)
+    if not face_details['matched']:
+        log_face_verification_attempt(
+            user,
+            event_type,
+            enabled=True,
+            matched=False,
+            similarity_score=face_details.get('similarity_score'),
+            threshold=threshold,
+            reason='face_not_matched',
+        )
+        return face_recognition_enabled, face_settings, face_details, face_details['message']
+
+    log_face_verification_attempt(
+        user,
+        event_type,
+        enabled=True,
+        matched=True,
+        similarity_score=face_details.get('similarity_score'),
+        threshold=threshold,
+    )
+    return face_recognition_enabled, face_settings, face_details, ''
 
 
 def face_verification_required_for(assigned_location):
@@ -382,12 +513,14 @@ def face_verification_settings_payload(assigned_location=None):
         else assigned_location.face_verification_enabled
     )
     required = settings_obj.face_recognition_enabled and location_enabled
+    threshold = face_match_threshold_value(settings_obj)
     return {
         'face_recognition_enabled': required,
         'require_face_verification': settings_obj.face_recognition_enabled,
         'face_verification_required': required,
         'global_face_verification_enabled': settings_obj.face_recognition_enabled,
         'location_face_verification_enabled': location_enabled,
+        'face_match_threshold': threshold,
         'updated_at': settings_obj.updated_at,
     }
 
@@ -398,6 +531,7 @@ def attendance_settings_payload():
         'face_recognition_enabled': settings_obj.face_recognition_enabled,
         'require_face_verification': settings_obj.face_recognition_enabled,
         'global_face_verification_enabled': settings_obj.face_recognition_enabled,
+        'face_match_threshold': face_match_threshold_value(settings_obj),
         'updated_at': settings_obj.updated_at,
     }
 
@@ -975,16 +1109,28 @@ class AuthTokenView(ObtainAuthToken):
 
     def post(self, request, *args, **kwargs):
         response = super().post(request, *args, **kwargs)
-        token = Token.objects.select_related('user').get(key=response.data['token'])
+        token = Token.objects.select_related('user', 'user__userprofile').get(
+            key=response.data['token']
+        )
+        user = token.user
+        if not get_user_profile(user) and not user.is_superuser:
+            UserProfile.objects.get_or_create(
+                user=user,
+                defaults={
+                    'employee_code': user.username.upper(),
+                    'can_access_user_dashboard': True,
+                },
+            )
+            user.refresh_from_db()
         requested_role = (request.data.get('role') or '').lower()
 
-        if requested_role and not user_can_access_dashboard(token.user, requested_role):
+        if requested_role and not user_can_access_dashboard(user, requested_role):
             return Response(
                 {'detail': 'Invalid Employee ID or Password'},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        return Response({'token': token.key, 'user': serialize_user(token.user)})
+        return Response({'token': token.key, 'user': serialize_user(user)})
 
 
 class MeView(APIView):
@@ -1150,8 +1296,6 @@ class AttendanceEventView(APIView):
     def post(self, request):
         assigned_location = getattr(request.user, 'assigned_location', None)
         location_restricted = assigned_location is not None and assigned_location.is_active
-        face_recognition_enabled = face_verification_required_for(assigned_location)
-        face_settings = face_verification_settings_payload(assigned_location)
         data = request.data.copy()
         if not location_restricted:
             data.setdefault('latitude', '0')
@@ -1173,35 +1317,27 @@ class AttendanceEventView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            face_details = {'enabled': False, 'matched': None, 'message': 'Face recognition disabled'}
-            if face_recognition_enabled:
-                _, profile_photo_error = validate_photo_biometric(
-                    profile_photo,
-                    'Registered employee photo',
-                )
-                if profile_photo_error:
-                    return Response(
-                        {
-                            'detail': (
-                                'Registered employee photo is required before '
-                                'check-in or check-out. Please contact admin.'
-                            ),
-                            'face_recognition_enabled': True,
-                            'face_verification_required': True,
-                        },
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
-                face_details = face_match_details(profile_photo, photo_biometric)
-                if not face_details['matched']:
-                    return Response(
-                        {
-                            'detail': 'Face not matched',
-                            'face_recognition_enabled': True,
-                            'face_verification_required': True,
-                            'face_match_details': face_details,
-                        },
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
+            (
+                face_recognition_enabled,
+                face_settings,
+                face_details,
+                face_error,
+            ) = verify_attendance_face_match(
+                request.user,
+                profile_photo,
+                photo_biometric,
+                self.event_type,
+            )
+            if face_error:
+                payload = {
+                    'detail': face_error,
+                    'face_recognition_enabled': face_recognition_enabled,
+                    'face_verification_required': face_recognition_enabled,
+                    'face_verification_settings': face_settings,
+                }
+                if face_details is not None:
+                    payload['face_match_details'] = face_details
+                return Response(payload, status=status.HTTP_400_BAD_REQUEST)
 
             if not location_restricted:
                 serializer.save(
@@ -1468,10 +1604,15 @@ class EmployeeLeaveRequestsView(APIView):
         return Response({'summary': leaves_dashboard(request.user), 'leaves': LeaveRequestSerializer(leaves, many=True).data})
 
     def post(self, request):
-        serializer = LeaveRequestSerializer(data=request.data)
+        payload = request.data.copy()
+        cc = (payload.pop('cc', None) or '').strip()
+        serializer = LeaveRequestSerializer(data=payload)
         if serializer.is_valid():
-            serializer.save(employee=request.user)
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            reason = serializer.validated_data.get('reason', '')
+            if cc:
+                reason = f'{reason}\nCC: {cc}'.strip()
+            leave = serializer.save(employee=request.user, reason=reason)
+            return Response(LeaveRequestSerializer(leave).data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -1633,12 +1774,23 @@ class EmployeeDirectoryView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        from django.db.models import Q
+
         User = get_user_model()
         employees = User.objects.select_related('userprofile').filter(
             is_active=True,
             is_staff=False,
         )
         employees = employees.exclude(id=request.user.id).order_by('first_name', 'username')
+        query = (request.query_params.get('q') or '').strip()
+        if len(query) >= 2:
+            employees = employees.filter(
+                Q(first_name__icontains=query)
+                | Q(last_name__icontains=query)
+                | Q(username__icontains=query)
+                | Q(email__icontains=query)
+                | Q(userprofile__employee_code__icontains=query)
+            ).distinct()[:25]
         return Response({
             'employees': [
                 serialize_user(employee)
@@ -2457,6 +2609,7 @@ class AdminAttendanceSettingsApiView(APIView):
         if not user_can_manage_people(request.user):
             raise PermissionDenied
         settings_obj = AttendanceSettings.current()
+        update_fields = ['updated_at']
         setting_key = (
             'face_recognition_enabled'
             if 'face_recognition_enabled' in request.data
@@ -2464,15 +2617,32 @@ class AdminAttendanceSettingsApiView(APIView):
             if 'require_face_verification' in request.data
             else None
         )
-        if setting_key is None:
+        if setting_key is not None:
+            settings_obj.face_recognition_enabled = request_bool(
+                request.data.get(setting_key)
+            )
+            update_fields.append('face_recognition_enabled')
+        if 'face_match_threshold' in request.data:
+            try:
+                threshold = float(request.data.get('face_match_threshold'))
+            except (TypeError, ValueError):
+                return Response(
+                    {'detail': 'face_match_threshold must be a number between 0 and 1.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if threshold < 0 or threshold > 1:
+                return Response(
+                    {'detail': 'face_match_threshold must be between 0 and 1.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            settings_obj.face_match_threshold = threshold
+            update_fields.append('face_match_threshold')
+        if len(update_fields) == 1:
             return Response(
-                {'detail': 'require_face_verification is required.'},
+                {'detail': 'require_face_verification or face_match_threshold is required.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        settings_obj.face_recognition_enabled = request_bool(
-            request.data.get(setting_key)
-        )
-        settings_obj.save(update_fields=['face_recognition_enabled', 'updated_at'])
+        settings_obj.save(update_fields=update_fields)
         return Response(attendance_settings_payload())
 
 

@@ -7,11 +7,15 @@ The main theme of the project is secure employee attendance using GPS location t
 ## Project Structure
 
 ```text
-HEALON_PROJECT/
-  frontend/   Flutter application
-  backend/    Django REST API and admin system
-  README.md   Project overview and setup
+HealOn_Project/
+├── frontend/          Flutter application
+├── backend/           Django REST API and admin system
+├── docs/              API docs, testing report, structure guide
+├── .gitignore
+└── README.md
 ```
+
+See `docs/PROJECT_STRUCTURE.md` for the full layout.
 
 ## Backend
 

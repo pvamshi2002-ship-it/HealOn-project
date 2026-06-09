@@ -1,7 +1,8 @@
+import re
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
-from django.test import override_settings
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from unittest.mock import patch
@@ -493,12 +494,15 @@ class DashboardLoginTests(APITestCase):
                 )
                 self.assertGreater(response.data['distance_meters'], 1700)
                 self.assertEqual(response.data['allowed_radius_meters'], 100)
-                self.assertIn('office_latitude=13.058889689752', logs.output[0])
-                self.assertIn('office_longitude=77.545932900597', logs.output[0])
-                self.assertIn('employee_latitude=13.065275000000000', logs.output[0])
-                self.assertIn('employee_longitude=77.529900000000000', logs.output[0])
-                self.assertIn('distance_meters=', logs.output[0])
-                self.assertIn('allowed_radius_meters=100', logs.output[0])
+                radius_log = next(
+                    entry for entry in logs.output if 'office_latitude=' in entry
+                )
+                self.assertIn('office_latitude=13.058889689752', radius_log)
+                self.assertIn('office_longitude=77.545932900597', radius_log)
+                self.assertIn('employee_latitude=13.065275000000000', radius_log)
+                self.assertIn('employee_longitude=77.529900000000000', radius_log)
+                self.assertIn('distance_meters=', radius_log)
+                self.assertIn('allowed_radius_meters=100', radius_log)
 
         self.assertFalse(Attendance.objects.filter(user=self.employee).exists())
 
@@ -520,9 +524,15 @@ class DashboardLoginTests(APITestCase):
         assert_decimal_equal(self, attendance.longitude, '0')
         self.assertIsNone(attendance.distance_meters)
 
-    def test_face_recognition_toggle_blocks_mismatched_attendance_photo(self):
+    def _enable_face_recognition(self, threshold=0.86):
         AttendanceSettings.current().save()
-        AttendanceSettings.objects.filter(pk=1).update(face_recognition_enabled=True)
+        AttendanceSettings.objects.filter(pk=1).update(
+            face_recognition_enabled=True,
+            face_match_threshold=threshold,
+        )
+
+    def test_face_recognition_toggle_blocks_mismatched_attendance_photo(self):
+        self._enable_face_recognition()
         self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.employee_token.key}')
 
         response = self.client.post(
@@ -534,9 +544,173 @@ class DashboardLoginTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data['detail'], 'Face not matched')
         self.assertTrue(response.data['face_recognition_enabled'])
+        self.assertIn('face_match_details', response.data)
+        self.assertFalse(response.data['face_match_details']['matched'])
+        self.assertEqual(response.data['detail'], response.data['face_match_details']['message'])
         self.assertFalse(Attendance.objects.filter(user=self.employee).exists())
+
+    def test_face_recognition_allows_matching_checkin_photo(self):
+        self._enable_face_recognition()
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.employee_token.key}')
+
+        response = self.client.post(
+            '/api/checkin/',
+            {'photo_biometric': PHOTO_BIOMETRIC},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(
+            response.data['biometric_details']['face_match_details']['matched']
+        )
+        attendance = Attendance.objects.get(user=self.employee, event_type=Attendance.CHECK_IN)
+        self.assertEqual(attendance.photo_biometric, PHOTO_BIOMETRIC)
+
+    def test_face_recognition_allows_matching_checkout_photo(self):
+        self._enable_face_recognition()
+        Attendance.objects.create(
+            user=self.employee,
+            event_type=Attendance.CHECK_IN,
+            latitude='0',
+            longitude='0',
+            photo_biometric=PHOTO_BIOMETRIC,
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.employee_token.key}')
+
+        response = self.client.post(
+            '/api/checkout/',
+            {'photo_biometric': PHOTO_BIOMETRIC},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(
+            response.data['biometric_details']['face_match_details']['matched']
+        )
+        self.assertTrue(
+            Attendance.objects.filter(
+                user=self.employee,
+                event_type=Attendance.CHECK_OUT,
+            ).exists()
+        )
+
+    def test_face_recognition_blocks_mismatched_checkout_photo(self):
+        self._enable_face_recognition()
+        Attendance.objects.create(
+            user=self.employee,
+            event_type=Attendance.CHECK_IN,
+            latitude='0',
+            longitude='0',
+            photo_biometric=PHOTO_BIOMETRIC,
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.employee_token.key}')
+
+        response = self.client.post(
+            '/api/checkout/',
+            {'photo_biometric': 'data:image/png;base64,bWlzbWF0Y2g='},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.data['face_match_details']['matched'])
+        self.assertEqual(response.data['detail'], response.data['face_match_details']['message'])
+        self.assertFalse(
+            Attendance.objects.filter(
+                user=self.employee,
+                event_type=Attendance.CHECK_OUT,
+            ).exists()
+        )
+
+    def test_face_recognition_requires_registered_photo_when_enabled(self):
+        self._enable_face_recognition()
+        UserProfile.objects.filter(user=self.employee).update(
+            profile_photo_biometric='',
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.employee_token.key}')
+
+        response = self.client.post(
+            '/api/checkin/',
+            {'photo_biometric': PHOTO_BIOMETRIC},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('verification photo is required', response.data['detail'].lower())
+        self.assertFalse(Attendance.objects.filter(user=self.employee).exists())
+
+    def test_face_recognition_disabled_bypasses_checkout_matching(self):
+        AttendanceSettings.current().save()
+        AttendanceSettings.objects.filter(pk=1).update(face_recognition_enabled=False)
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.employee_token.key}')
+
+        response = self.client.post(
+            '/api/checkout/',
+            {'photo_biometric': 'data:image/png;base64,bWlzbWF0Y2g='},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertFalse(
+            response.data['biometric_details']['face_recognition_enabled']
+        )
+        self.assertEqual(
+            response.data['biometric_details']['face_match_details']['message'],
+            'Face recognition disabled',
+        )
+
+    def test_face_recognition_logs_failed_match(self):
+        self._enable_face_recognition()
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.employee_token.key}')
+
+        with self.assertLogs('people.views', level='INFO') as logs:
+            response = self.client.post(
+                '/api/checkin/',
+                {'photo_biometric': 'data:image/png;base64,bWlzbWF0Y2g='},
+                format='json',
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue(
+            any('face_not_matched' in entry for entry in logs.output)
+        )
+
+    def test_face_recognition_logs_successful_match(self):
+        self._enable_face_recognition()
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.employee_token.key}')
+
+        with self.assertLogs('people.views', level='INFO') as logs:
+            response = self.client.post(
+                '/api/checkin/',
+                {'photo_biometric': PHOTO_BIOMETRIC},
+                format='json',
+            )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(any('matched=True' in entry for entry in logs.output))
+
+    def test_location_face_verification_disabled_bypasses_matching(self):
+        self._enable_face_recognition()
+        AssignedLocation.objects.create(
+            user=self.employee,
+            name='Remote Office',
+            address='Remote Office',
+            latitude='17.385044',
+            longitude='78.486671',
+            coordinates_resolved=True,
+            is_active=False,
+            face_verification_enabled=False,
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.employee_token.key}')
+
+        response = self.client.post(
+            '/api/checkin/',
+            {'photo_biometric': 'data:image/png;base64,bWlzbWF0Y2g='},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertFalse(response.data['biometric_details']['face_recognition_enabled'])
 
     def test_face_recognition_disabled_still_saves_attendance_photo(self):
         AttendanceSettings.current().save()
@@ -567,6 +741,20 @@ class DashboardLoginTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.data['face_recognition_enabled'])
         self.assertTrue(AttendanceSettings.current().face_recognition_enabled)
+        self.assertEqual(response.data['face_match_threshold'], 0.86)
+
+    def test_admin_can_update_face_match_threshold(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.admin_token.key}')
+
+        response = self.client.patch(
+            '/api/admin/attendance-settings/',
+            {'face_match_threshold': 0.9},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['face_match_threshold'], 0.9)
+        self.assertEqual(AttendanceSettings.current().face_match_threshold, 0.9)
 
     def test_checkout_allows_disabled_assigned_location_without_restriction(self):
         AssignedLocation.objects.create(
@@ -1084,3 +1272,219 @@ class DashboardLoginTests(APITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertFalse(PasswordResetOTP.objects.exists())
+
+
+ADMIN_EMPLOYEE_PHOTO = (
+    'data:image/png;base64,'
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+)
+
+
+class DjangoAdminEmployeeSaveTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.admin = User.objects.create_superuser(
+            username='diagadmin',
+            email='diagadmin@healon.local',
+            password='Admin@123',
+        )
+        self.client = Client()
+        self.client.force_login(self.admin)
+
+    def _inline_post_data_from_page(self, content):
+        post_data = {}
+        for match in re.finditer(r'<input[^>]+name="([^"]+)"[^>]+value="([^"]*)"', content):
+            name, value = match.group(1), match.group(2)
+            if (
+                name.startswith('assigned_location-')
+                or name.startswith('attendance_set-')
+            ) and name not in post_data:
+                post_data[name] = value
+        for match in re.finditer(
+            r'<textarea[^>]+name="((?:assigned_location|attendance_set)-[^"]+)"[^>]*>([^<]*)</textarea>',
+            content,
+            re.DOTALL,
+        ):
+            post_data[match.group(1)] = match.group(2)
+        for match in re.finditer(
+            r'<input[^>]+type="hidden"[^>]+name="((?:assigned_location|attendance_set)-[^"]+)"[^>]+value="([^"]*)"',
+            content,
+        ):
+            post_data[match.group(1)] = match.group(2)
+        return post_data
+
+    def _base_employee_data(self, username):
+        return {
+            'first_name': 'Diag',
+            'last_name': 'Test',
+            'display_name': 'Diag Test',
+            'username': username,
+            'email': f'{username}@healon.local',
+            'employee_code': f'EMP-{username.upper()}',
+            'mobile_number': '9876543299',
+            'profile_photo_biometric': ADMIN_EMPLOYEE_PHOTO,
+            'gender': 'male',
+            'date_of_birth': '1990-01-15',
+            'department': 'Engineering',
+            'designation': 'Developer',
+            'can_access_user_dashboard': 'on',
+        }
+
+    def test_admin_create_employee_persists_profile_fields(self):
+        User = get_user_model()
+        username = 'diagcreate01'
+        add_url = reverse('admin:auth_user_add')
+        add_page = self.client.get(add_url)
+        self.assertEqual(add_page.status_code, 200)
+        post_data = {
+            **self._base_employee_data(username),
+            **self._inline_post_data_from_page(add_page.content.decode('utf-8', errors='ignore')),
+            'password1': 'DiagTest@123',
+            'password2': 'DiagTest@123',
+        }
+        response = self.client.post(add_url, post_data, follow=True)
+        self.assertEqual(response.status_code, 200, response.content[:2000])
+
+        user = User.objects.filter(username=username).first()
+        self.assertIsNotNone(user)
+        profile = UserProfile.objects.filter(user=user).first()
+        self.assertIsNotNone(profile)
+        self.assertEqual(profile.mobile_number, '9876543299')
+        self.assertEqual(profile.employee_code, f'EMP-{username.upper()}')
+        self.assertEqual(profile.department, 'Engineering')
+        self.assertEqual(profile.designation, 'Developer')
+        self.assertEqual(str(profile.date_of_birth), '1990-01-15')
+        self.assertEqual(profile.gender, 'male')
+
+    def test_admin_update_employee_persists_mobile_and_designation(self):
+        User = get_user_model()
+        username = 'diagupdate01'
+        user = User.objects.create_user(
+            username=username,
+            email=f'{username}@healon.local',
+            password='DiagTest@123',
+            first_name='Diag',
+            last_name='Test',
+        )
+        UserProfile.objects.filter(user=user).update(
+            employee_code='EMP-OLD',
+            mobile_number='9000000000',
+            department='Support',
+            designation='Agent',
+            profile_photo_biometric=ADMIN_EMPLOYEE_PHOTO,
+            can_access_user_dashboard=True,
+        )
+
+        change_url = reverse('admin:auth_user_change', args=[user.id])
+        change_page = self.client.get(change_url)
+        self.assertEqual(change_page.status_code, 200)
+        post_data = {
+            **self._base_employee_data(username),
+            **self._inline_post_data_from_page(change_page.content.decode('utf-8', errors='ignore')),
+            'mobile_number': '1112223333',
+            'designation': 'Senior Developer',
+        }
+        response = self.client.post(change_url, post_data, follow=True)
+        self.assertEqual(response.status_code, 200, response.content[:2000])
+
+        profile = UserProfile.objects.get(user=user)
+        self.assertEqual(profile.mobile_number, '1112223333')
+        self.assertEqual(profile.designation, 'Senior Developer')
+
+    def test_admin_update_profile_with_unresolved_assigned_location_inline(self):
+        User = get_user_model()
+        username = 'diagloc01'
+        user = User.objects.create_user(
+            username=username,
+            email=f'{username}@healon.local',
+            password='DiagTest@123',
+            first_name='Diag',
+            last_name='Test',
+        )
+        UserProfile.objects.filter(user=user).update(
+            employee_code='EMP-LOC',
+            mobile_number='9000000000',
+            department='Support',
+            designation='Agent',
+            profile_photo_biometric=ADMIN_EMPLOYEE_PHOTO,
+            can_access_user_dashboard=True,
+        )
+        AssignedLocation.objects.create(
+            user=user,
+            name='Office',
+            address='Some office address',
+            latitude=0,
+            longitude=0,
+            coordinates_resolved=False,
+            is_active=True,
+            radius_meters=100,
+        )
+
+        change_url = reverse('admin:auth_user_change', args=[user.id])
+        get_response = self.client.get(change_url)
+        self.assertEqual(get_response.status_code, 200)
+        post_data = {
+            **self._base_employee_data(username),
+            **self._inline_post_data_from_page(
+                get_response.content.decode('utf-8', errors='ignore')
+            ),
+            'mobile_number': '5555555555',
+        }
+        response = self.client.post(change_url, post_data, follow=True)
+        profile = UserProfile.objects.get(user=user)
+        self.assertEqual(profile.mobile_number, '5555555555')
+
+    def test_admin_create_without_photo_shows_validation_error(self):
+        User = get_user_model()
+        username = 'diagfailphoto'
+        add_url = reverse('admin:auth_user_add')
+        add_page = self.client.get(add_url)
+        post_data = {
+            **self._base_employee_data(username),
+            **self._inline_post_data_from_page(add_page.content.decode('utf-8', errors='ignore')),
+            'profile_photo_biometric': '',
+            'password1': 'DiagTest@123',
+            'password2': 'DiagTest@123',
+        }
+        response = self.client.post(add_url, post_data, follow=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(User.objects.filter(username=username).exists())
+        self.assertIn('profile_photo_biometric', response.context['adminform'].form.errors)
+
+    def test_admin_create_with_invalid_password_shows_validation_error(self):
+        User = get_user_model()
+        username = 'diagfailpass'
+        add_url = reverse('admin:auth_user_add')
+        add_page = self.client.get(add_url)
+        post_data = {
+            **self._base_employee_data(username),
+            **self._inline_post_data_from_page(add_page.content.decode('utf-8', errors='ignore')),
+            'password1': 'weak',
+            'password2': 'weak',
+        }
+        response = self.client.post(add_url, post_data, follow=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(User.objects.filter(username=username).exists())
+        self.assertTrue(response.context['adminform'].form.errors)
+
+    def test_admin_save_continue_and_add_another_actions(self):
+        User = get_user_model()
+        for action, username in (
+            ('_continue', 'diagcontinue01'),
+            ('_addanother', 'diagaddanother01'),
+        ):
+            with self.subTest(action=action):
+                add_url = reverse('admin:auth_user_add')
+                add_page = self.client.get(add_url)
+                post_data = {
+                    **self._base_employee_data(username),
+                    **self._inline_post_data_from_page(
+                        add_page.content.decode('utf-8', errors='ignore')
+                    ),
+                    'password1': 'DiagTest@123',
+                    'password2': 'DiagTest@123',
+                    action: '1',
+                }
+                response = self.client.post(add_url, post_data, follow=False)
+                self.assertIn(response.status_code, (302, 200), response.content[:2000])
+                self.assertTrue(User.objects.filter(username=username).exists())
