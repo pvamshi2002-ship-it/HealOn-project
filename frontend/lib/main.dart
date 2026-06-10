@@ -1705,7 +1705,17 @@ class _HomePageState extends State<HomePage> {
         );
       }
     } catch (e) {
-      setState(() => _status = 'Connection error: $e');
+      final errorText = e.toString();
+      final unreachable = errorText.contains('XMLHttpRequest') ||
+          errorText.contains('ClientException') ||
+          errorText.contains('SocketException') ||
+          errorText.contains('Failed host lookup');
+      setState(
+        () => _status = unreachable
+            ? 'Unable to reach HealOn server at $backendUrl. '
+                'Start the backend with manage.py runserver and refresh.'
+            : 'Connection error: $e',
+      );
     } finally {
       setState(() => _isLoading = false);
     }
