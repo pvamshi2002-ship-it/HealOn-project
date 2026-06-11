@@ -8,7 +8,7 @@
 
 ## 1. Project Overview
 
-HealOn is a role-based HR and attendance platform supporting authentication, GPS attendance, face verification, employee management, leave/payroll workflows, helpdesk, tasks, dashboards, and admin tooling.
+HealOn is a role-based  attendance platform supporting authentication, GPS attendance, face verification, employee management, leave/payroll workflows, helpdesk, tasks, dashboards, and admin tooling.
 
 ---
 
