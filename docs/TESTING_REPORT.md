@@ -8,7 +8,9 @@
 
 ## 1. Project Overview
 
-HealOn is a role-based  attendance platform supporting authentication, GPS attendance, face verification, employee management, leave/payroll workflows, helpdesk, tasks, dashboards, and admin tooling.
+HealOn is a Attendance Management System designed to streamline workforce operations through intelligent attendance tracking, face verification, role-based access control (RBAC), task management, helpdesk support, and real-time dashboards. The platform enables organizations to efficiently manage employees, monitor attendance activities, automate administrative workflows, and maintain secure access across different user roles.
+
+Built using modern technologies including Flutter, Django, and REST APIs, HealOn provides a scalable, secure, and user-friendly solution that enhances productivity, improves operational transparency, and simplifies day-to-day workforce management. The system combines powerful backend automation with an intuitive frontend experience, making it suitable for organizations seeking a reliable and efficient attendance and employee management platform.
 
 ---
 
