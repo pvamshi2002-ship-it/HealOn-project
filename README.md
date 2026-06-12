@@ -2,7 +2,7 @@
 
 HealOn is a smart attendance system built with a Flutter frontend and Django REST backend.
 
-The main theme of the project is secure employee attendance using GPS location tracking, radius restriction, and photo biometric verification. The system also supports employee management, dashboards, leave requests, attendance regularization, payroll, reimbursements, helpdesk tickets, and password reset.
+"The main theme of the project is to ensure secure and accurate employee attendance using GPS-based location tracking and radius-based validation, allowing attendance to be marked only within authorized locations."
 
 ## Project Structure
 
