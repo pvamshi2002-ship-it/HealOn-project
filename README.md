@@ -105,15 +105,6 @@ cd "D:\projects\healOn project\backend"
 - Task tracking.
 -Email OTP verification validates a user's identity by sending a one-time password to their registered email address.
 
-## Password Reset OTP
-
-Forgot Password uses Firebase phone authentication on Flutter Web/Chrome only.
-The web build reads `frontend/lib/firebase_options.dart`; Android Firebase
-configuration is not used for this OTP flow.
-For backend token verification outside local `DEBUG` development, install
-`backend/requirements.txt` and set `FIREBASE_SERVICE_ACCOUNT_FILE` to a Firebase
-service account JSON file.
-
 In Firebase Console, create a Web app for project `healon-a62fd`, enable
 Authentication > Sign-in method > Phone, and add your local host under
 Authentication > Settings > Authorized domains. Copy the Web app's `appId`
