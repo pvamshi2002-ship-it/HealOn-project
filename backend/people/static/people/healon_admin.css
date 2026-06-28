@@ -1,0 +1,439 @@
+:root {
+  --healon-navy: #0f172a;
+  --healon-navy-soft: #1e293b;
+  --healon-emerald: #10b981;
+  --healon-emerald-dark: #047857;
+  --healon-gray: #f3f6f8;
+  --healon-border: #e2e8f0;
+  --healon-text: #1f2937;
+  --healon-muted: #64748b;
+}
+
+body {
+  font-family: Inter, "Segoe UI", Roboto, Arial, sans-serif;
+  background: var(--healon-gray);
+  color: var(--healon-text);
+}
+
+.brand-link {
+  border-bottom: 1px solid var(--healon-border) !important;
+  min-height: 64px;
+}
+
+.brand-link .brand-image {
+  max-height: 38px;
+  margin-left: .4rem;
+}
+
+.brand-link .brand-text {
+  color: var(--healon-navy) !important;
+  font-weight: 800 !important;
+  letter-spacing: 0;
+}
+
+.main-sidebar {
+  box-shadow: 0 20px 45px rgba(15, 23, 42, .08) !important;
+}
+
+.sidebar-light-primary .nav-sidebar > .nav-item > .nav-link.active,
+.sidebar-light-primary .nav-sidebar > .nav-item > .nav-link:hover {
+  background: #e8f7f1 !important;
+  color: var(--healon-emerald-dark) !important;
+  border-radius: 8px;
+}
+
+.nav-sidebar .nav-link {
+  border-radius: 8px;
+  margin: 2px 10px;
+}
+
+.content-wrapper {
+  background: var(--healon-gray);
+}
+
+.content-header h1 {
+  color: var(--healon-navy);
+  font-weight: 800;
+}
+
+.card,
+.module,
+.healon-panel,
+.login-box .card {
+  border: 1px solid var(--healon-border) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, .07) !important;
+}
+
+.btn-primary,
+.btn-success {
+  background: var(--healon-emerald) !important;
+  border-color: var(--healon-emerald) !important;
+}
+
+.btn-primary:hover,
+.btn-success:hover {
+  background: var(--healon-emerald-dark) !important;
+  border-color: var(--healon-emerald-dark) !important;
+}
+
+.table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.table thead th,
+#result_list thead th {
+  background: #f8fafc !important;
+  border-bottom: 1px solid var(--healon-border) !important;
+  color: var(--healon-navy);
+  font-size: .78rem;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+#result_list tbody tr:nth-child(even),
+.table-striped tbody tr:nth-of-type(odd) {
+  background: #fbfdff;
+}
+
+#result_list tbody tr:hover,
+.table-hover tbody tr:hover {
+  background: #ecfdf5 !important;
+}
+
+#result_list td,
+#result_list th {
+  vertical-align: middle;
+}
+
+.healon-status-badge {
+  border: 1px solid;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.healon-dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.healon-hero {
+  align-items: center;
+  background: var(--healon-navy);
+  border-radius: 8px;
+  color: #fff;
+  display: flex;
+  justify-content: space-between;
+  min-height: 150px;
+  overflow: hidden;
+  padding: 28px;
+  position: relative;
+}
+
+.healon-hero > * {
+  position: relative;
+  z-index: 1;
+}
+
+.healon-kicker {
+  color: #a7f3d0;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+  margin: 0 0 8px;
+  text-transform: uppercase;
+}
+
+.healon-hero h1 {
+  font-size: 32px;
+  font-weight: 850;
+  letter-spacing: 0;
+  margin: 0;
+}
+
+.healon-muted {
+  color: var(--healon-muted);
+}
+
+.healon-hero .healon-muted {
+  color: #cbd5e1;
+  margin: 8px 0 0;
+}
+
+.healon-profile-chip {
+  align-items: center;
+  background: rgba(255, 255, 255, .12);
+  border: 1px solid rgba(255, 255, 255, .18);
+  border-radius: 999px;
+  display: inline-flex;
+  gap: 8px;
+  padding: 10px 14px;
+}
+
+.healon-metrics,
+.healon-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.healon-metrics {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.healon-metric {
+  background: #fff;
+  border: 1px solid var(--healon-border);
+  border-radius: 8px;
+  box-shadow: 0 14px 28px rgba(15, 23, 42, .06);
+  color: var(--healon-text);
+  display: flex;
+  flex-direction: column;
+  min-height: 138px;
+  padding: 18px;
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+
+.healon-metric:hover {
+  border-color: rgba(16, 185, 129, .45);
+  box-shadow: 0 22px 42px rgba(15, 23, 42, .1);
+  color: var(--healon-text);
+  text-decoration: none;
+  transform: translateY(-3px);
+}
+
+.healon-metric-icon {
+  align-items: center;
+  border-radius: 8px;
+  color: #fff;
+  display: inline-flex;
+  height: 40px;
+  justify-content: center;
+  margin-bottom: 14px;
+  width: 40px;
+}
+
+.healon-tone-navy .healon-metric-icon { background: #0f172a; }
+.healon-tone-emerald .healon-metric-icon { background: #10b981; }
+.healon-tone-orange .healon-metric-icon { background: #f97316; }
+.healon-tone-amber .healon-metric-icon { background: #f59e0b; }
+.healon-tone-blue .healon-metric-icon { background: #2563eb; }
+.healon-tone-slate .healon-metric-icon { background: #475569; }
+
+.healon-metric-value {
+  color: var(--healon-navy);
+  font-size: 28px;
+  font-weight: 850;
+  line-height: 1;
+}
+
+.healon-metric-label {
+  color: var(--healon-muted);
+  font-size: 13px;
+  font-weight: 700;
+  margin-top: 8px;
+}
+
+.healon-grid-main {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.healon-grid-widgets {
+  grid-template-columns: 1.2fr .8fr;
+}
+
+.healon-grid-lists {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.healon-panel {
+  background: #fff;
+  padding: 20px;
+}
+
+.healon-panel-head {
+  align-items: flex-start;
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.healon-panel-head h2 {
+  color: var(--healon-navy);
+  font-size: 17px;
+  font-weight: 850;
+  margin: 0;
+}
+
+.healon-panel-head span {
+  color: var(--healon-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.healon-actions,
+.healon-summary,
+.healon-module-groups {
+  display: grid;
+  gap: 12px;
+}
+
+.healon-actions {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.healon-actions a {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid var(--healon-border);
+  border-radius: 8px;
+  color: var(--healon-navy);
+  display: flex;
+  font-weight: 800;
+  gap: 8px;
+  justify-content: center;
+  min-height: 54px;
+  padding: 10px;
+}
+
+.healon-actions a:hover,
+.healon-module-groups a:hover {
+  background: #ecfdf5;
+  color: var(--healon-emerald-dark);
+  text-decoration: none;
+}
+
+.healon-summary {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.healon-summary div {
+  background: #f8fafc;
+  border: 1px solid var(--healon-border);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.healon-summary strong {
+  color: var(--healon-navy);
+  display: block;
+  font-size: 26px;
+  font-weight: 850;
+}
+
+.healon-summary span {
+  color: var(--healon-muted);
+  font-weight: 700;
+}
+
+.healon-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.healon-list a {
+  align-items: center;
+  border: 1px solid var(--healon-border);
+  border-radius: 8px;
+  color: var(--healon-text);
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+}
+
+.healon-list a:hover {
+  background: #f8fafc;
+  color: var(--healon-text);
+  text-decoration: none;
+}
+
+.healon-list strong,
+.healon-list span span {
+  display: block;
+}
+
+.healon-list strong {
+  color: var(--healon-navy);
+}
+
+.healon-list time {
+  color: var(--healon-muted);
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.healon-empty {
+  color: var(--healon-muted);
+  margin: 0;
+}
+
+.healon-module-groups {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.healon-module-groups div {
+  border: 1px solid var(--healon-border);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.healon-module-groups h3 {
+  color: var(--healon-navy);
+  font-size: 14px;
+  font-weight: 850;
+  margin: 0 0 10px;
+}
+
+.healon-module-groups a {
+  border-radius: 6px;
+  color: var(--healon-muted);
+  display: block;
+  font-weight: 700;
+  padding: 7px 8px;
+}
+
+@media (max-width: 1200px) {
+  .healon-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .healon-grid-main,
+  .healon-grid-widgets,
+  .healon-grid-lists,
+  .healon-module-groups,
+  .healon-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .healon-hero {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 640px) {
+  .healon-metrics,
+  .healon-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .healon-hero {
+    padding: 22px;
+  }
+
+  .healon-hero h1 {
+    font-size: 26px;
+  }
+}

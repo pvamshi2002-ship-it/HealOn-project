@@ -1,0 +1,95 @@
+.healon-location-map-panel {
+  margin-top: 12px;
+  max-width: 920px;
+  border: 1px solid #dbe4ea;
+  border-radius: 8px;
+  background: #f8fbff;
+  overflow: hidden;
+}
+
+.healon-location-map-toolbar {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto auto;
+  gap: 8px;
+  padding: 12px;
+  background: #ffffff;
+  border-bottom: 1px solid #dbe4ea;
+}
+
+.healon-location-search-input {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 7px 10px;
+}
+
+.healon-location-map-button {
+  min-height: 38px;
+  border: 1px solid #10b981;
+  border-radius: 6px;
+  background: #10b981;
+  color: #ffffff;
+  font-weight: 700;
+  padding: 7px 12px;
+  cursor: pointer;
+}
+
+.healon-location-map-button.secondary {
+  background: #ffffff;
+  color: #047857;
+}
+
+.healon-location-map-button:disabled {
+  cursor: not-allowed;
+  opacity: .65;
+}
+
+.healon-location-map {
+  height: 360px;
+  width: 100%;
+  background: #e2e8f0;
+}
+
+.healon-location-map-status {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 12px;
+  background: #ffffff;
+  border-top: 1px solid #dbe4ea;
+}
+
+.healon-location-map-status span {
+  display: block;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.healon-location-map-status strong {
+  display: block;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.healon-location-map-message {
+  padding: 0 12px 12px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.healon-location-map-message.error {
+  color: #b91c1c;
+}
+
+@media (max-width: 720px) {
+  .healon-location-map-toolbar,
+  .healon-location-map-status {
+    grid-template-columns: 1fr;
+  }
+}

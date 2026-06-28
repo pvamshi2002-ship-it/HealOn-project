@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="HealOn logo">
+  <rect width="128" height="128" rx="28" fill="#0f172a"/>
+  <path d="M34 66c0-19 12-34 30-34s30 15 30 34-12 34-30 34-30-15-30-34z" fill="#10b981" opacity=".18"/>
+  <path d="M38 70h20V48h12v22h20v12H70v22H58V82H38z" fill="#ffffff"/>
+  <path d="M34 34h60v14H34z" fill="#10b981"/>
+</svg>
