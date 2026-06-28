@@ -6,9 +6,7 @@ import '../support/test_helpers.dart';
 void main() {
   tearDown(tearDownHealOnTests);
 
-  testWidgets('user dashboard loads notification-capable workspace', (
-    tester,
-  ) async {
+  testWidgets('user dashboard loads workspace', (tester) async {
     await loginWithRole(tester, role: 'User');
 
     expect(find.text('Dashboard'), findsWidgets);

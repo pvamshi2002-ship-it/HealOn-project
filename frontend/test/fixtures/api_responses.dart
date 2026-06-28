@@ -63,9 +63,6 @@ final userDashboardResponse = jsonResponse({
   'holidays': [
     {'name': 'Republic Day', 'date': '2026-01-26'},
   ],
-  'notifications': [
-    {'title': 'Leave approved', 'message': 'Your leave was approved'},
-  ],
   'attendance_settings': {
     'face_recognition_enabled': false,
     'face_match_threshold': 0.86,

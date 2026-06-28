@@ -23,7 +23,6 @@ const _sidebarParentBySubmenu = <String, String>{
   'Add Location': 'Smart Location Management',
   'Edit Location': 'Smart Location Management',
   'Help Desk': 'Helpdesk',
-  'Notifications': 'Notifications',
   'Reimbursement': 'Employee Payroll',
   'Salary Structure': 'Employee Payroll',
 };
